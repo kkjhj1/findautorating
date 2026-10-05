@@ -1,0 +1,34 @@
+# Environment variables & secrets (CRITICAL)
+.env
+*.env.local
+
+# Databases & local data (CRITICAL)
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+!data/.gitkeep
+
+# Python cache & bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Testing & Scratch scripts
+.pytest_cache/
+scratch/
+.coverage
+htmlcov/
+
+# IDE & Editor settings
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
