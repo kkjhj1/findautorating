@@ -16,6 +16,7 @@ class CollectionJob(Base):
     error_count = Column(Integer, default=0, nullable=False)
     manual_check_count = Column(Integer, default=0, nullable=False)
     status = Column(String(30), default="RUNNING", nullable=False) # RUNNING, SUCCESS, PARTIAL_SUCCESS, FAILED
+    error_message = Column(Text, nullable=True)
 
     logs = relationship("CollectionLog", back_populates="job", cascade="all, delete-orphan")
 

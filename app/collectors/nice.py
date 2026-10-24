@@ -36,7 +36,7 @@ class NICEAdapter(RatingAgencyAdapter):
 
     def health_check(self) -> bool:
         try:
-            with httpx.Client(timeout=5.0, headers=self.headers, verify=False) as client:
+            with httpx.Client(timeout=5.0, headers=self.headers, verify=True) as client:
                 res = client.get(f"{self.base_url}/main.do")
                 return res.status_code == 200
         except Exception:
@@ -73,7 +73,7 @@ class NICEAdapter(RatingAgencyAdapter):
         curr_url = f"{self.base_url}/disclosure/companySearch.do?searchText={keyword}"
         should_close = False
         if client is None:
-            client = httpx.Client(timeout=12.0, headers=self.headers, follow_redirects=True, verify=False)
+            client = httpx.Client(timeout=12.0, headers=self.headers, follow_redirects=True, verify=True)
             should_close = True
 
         for retry_idx in range(2):
@@ -158,7 +158,7 @@ class NICEAdapter(RatingAgencyAdapter):
         detail_url = f"{self.base_url}/disclosure/companyGradeInfo.do?cmpCd={company.company_id}"
         should_close = False
         if client is None:
-            client = httpx.Client(timeout=12.0, headers=self.headers, follow_redirects=True, verify=False)
+            client = httpx.Client(timeout=12.0, headers=self.headers, follow_redirects=True, verify=True)
             should_close = True
 
         html_text = ""
@@ -327,7 +327,7 @@ class NICEAdapter(RatingAgencyAdapter):
                         timeout=18.0,
                         headers=self.headers,
                         follow_redirects=True,
-                        verify=False,
+                        verify=True,
                         limits=httpx.Limits(max_keepalive_connections=4, max_connections=6)
                     ) as client:
                         if search_keywords:

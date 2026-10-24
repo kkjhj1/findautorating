@@ -225,6 +225,34 @@ def create_institution(payload: InstitutionCreate, db: Session = Depends(get_db)
     db.refresh(inst)
     return inst
 
+@router.put("/mapping")
+def update_institution_mapping(payload: ManualMappingUpdate, db: Session = Depends(get_db)):
+    """수동확인 후 매핑 정보 확정 (PRD 제12조, 28조)"""
+    mapping = db.query(AgencyInstitutionMapping).filter_by(
+        institution_id=payload.institution_id,
+        agency_code=payload.agency_code
+    ).first()
+
+    if not mapping:
+        mapping = AgencyInstitutionMapping(
+            institution_id=payload.institution_id,
+            agency_code=payload.agency_code,
+            search_name=payload.search_name,
+            alias_name=payload.alias_name,
+            mapping_status=payload.status,
+            confidence=1.0
+        )
+        db.add(mapping)
+    else:
+        mapping.search_name = payload.search_name
+        if payload.alias_name:
+            mapping.alias_name = payload.alias_name
+        mapping.mapping_status = payload.status
+        mapping.confidence = 1.0
+
+    db.commit()
+    return {"status": "success", "message": "매핑 정보가 업데이트되었습니다."}
+
 @router.put("/{institution_id}", response_model=InstitutionResponse)
 def update_institution(institution_id: str, payload: InstitutionUpdate, db: Session = Depends(get_db)):
     """[요구사항 6] 상품제공기관 정보 수정 (사명변경, 업권, 검색어, 사용여부 등)"""
@@ -279,31 +307,3 @@ def delete_institution(institution_id: str, db: Session = Depends(get_db)):
         "message": f"기관 '{inst.institution_name}'이(가) 비활성화(미사용) 처리되었습니다.",
         "institution_id": institution_id
     }
-
-@router.put("/mapping")
-def update_institution_mapping(payload: ManualMappingUpdate, db: Session = Depends(get_db)):
-    """수동확인 후 매핑 정보 확정 (PRD 제12조, 28조)"""
-    mapping = db.query(AgencyInstitutionMapping).filter_by(
-        institution_id=payload.institution_id,
-        agency_code=payload.agency_code
-    ).first()
-
-    if not mapping:
-        mapping = AgencyInstitutionMapping(
-            institution_id=payload.institution_id,
-            agency_code=payload.agency_code,
-            search_name=payload.search_name,
-            alias_name=payload.alias_name,
-            mapping_status=payload.status,
-            confidence=1.0
-        )
-        db.add(mapping)
-    else:
-        mapping.search_name = payload.search_name
-        if payload.alias_name:
-            mapping.alias_name = payload.alias_name
-        mapping.mapping_status = payload.status
-        mapping.confidence = 1.0
-
-    db.commit()
-    return {"status": "success", "message": "매핑 정보가 업데이트되었습니다."}

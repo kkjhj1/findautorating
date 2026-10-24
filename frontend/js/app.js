@@ -1,4 +1,14 @@
 // Frontend Application Logic
+function escapeHtml(str) {
+  if (str == null) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 let allRatingsData = [];
 let currentHistoryData = [];
 let selectedInstitutionIds = new Set();
@@ -253,13 +263,24 @@ async function checkJobStatus() {
       isJobCurrentlyRunning = false;
       if (wasJobRunning) {
         wasJobRunning = false;
-        if (progressBarFill) progressBarFill.style.width = "100%";
-        if (progressPercent) progressPercent.textContent = "100%";
-        if (progressCurrentInst) progressCurrentInst.textContent = "조사 완료!";
-        
+        const lastStatus = data.last_job ? data.last_job.status : "COMPLETED";
+        const errorMsg = (data.last_job && data.last_job.error_message) ? data.last_job.error_message : "";
+
         liveUpdatedIds.clear();
         await loadDashboardData();
-        showToast("신용등급 조사가 완료되었습니다! 검토 후 [당월 등급 최종 확정]을 진행해 주세요.", true);
+
+        if (lastStatus === "STOPPED") {
+          if (progressCurrentInst) progressCurrentInst.textContent = "조사 중단됨";
+          showToast("신용등급 조사가 사용자에 의해 중단되었습니다.", false);
+        } else if (lastStatus === "FAILED") {
+          if (progressCurrentInst) progressCurrentInst.textContent = "조사 실패";
+          showToast(`조사 중 오류가 발생했습니다: ${errorMsg || '시스템 오류'}`, false);
+        } else {
+          if (progressBarFill) progressBarFill.style.width = "100%";
+          if (progressPercent) progressPercent.textContent = "100%";
+          if (progressCurrentInst) progressCurrentInst.textContent = "조사 완료!";
+          showToast("신용등급 조사가 완료되었습니다! 검토 후 [당월 등급 최종 확정]을 진행해 주세요.", true);
+        }
 
         setTimeout(() => {
           if (progressCard) progressCard.style.display = "none";
@@ -493,7 +514,7 @@ function formatAgencyRatingCell(rating, ratingType, outlook, status) {
   const tipParts = [];
   if (ratingType) tipParts.push(ratingType);
   if (outlook && outlook !== "-" && outlook !== "null" && outlook !== "None") tipParts.push(`전망: ${outlook}`);
-  const titleAttr = tipParts.length > 0 ? `title="${tipParts.join(' | ')}"` : '';
+  const titleAttr = tipParts.length > 0 ? `title="${escapeHtml(tipParts.join(' | '))}"` : '';
 
   // 전망(Outlook)에 따른 글자/배지 색상 분류
   let outlookClass = "out-color-stable";
@@ -507,7 +528,7 @@ function formatAgencyRatingCell(rating, ratingType, outlook, status) {
     }
   }
 
-  return `<span class="rating-badge-color mono ${outlookClass}" ${titleAttr}>${rating}</span>`;
+  return `<span class="rating-badge-color mono ${outlookClass}" ${titleAttr}>${escapeHtml(rating)}</span>`;
 }
 
 function renderTable(data) {
@@ -525,7 +546,7 @@ function renderTable(data) {
     
     // 1. 전월 최종등급
     const prevBadge = item.prev_final_rating 
-      ? `<span class="rating-badge prev mono" style="background:rgba(148,163,184,0.12); color:#94a3b8; font-weight:600;">${item.prev_final_rating}</span>`
+      ? `<span class="rating-badge prev mono" style="background:rgba(148,163,184,0.12); color:#94a3b8; font-weight:600;">${escapeHtml(item.prev_final_rating)}</span>`
       : `<span style="color:var(--text-dim)">-</span>`;
 
     // 2. 당월 최종등급
@@ -533,7 +554,7 @@ function renderTable(data) {
     if (item.overall_status === "COLLECTING") {
       finalBadge = `<span class="rating-badge collecting mono" style="background:rgba(59,130,246,0.18); color:#60a5fa; font-weight:600;"><span class="spin-icon" style="display:inline-block; font-size:10px;">⏳</span> 조사중</span>`;
     } else if (item.final_rating) {
-      finalBadge = `<span class="rating-badge final mono">${item.final_rating}</span>`;
+      finalBadge = `<span class="rating-badge final mono">${escapeHtml(item.final_rating)}</span>`;
     }
 
     // 3. 전월대비 변동 뱃지
@@ -541,9 +562,9 @@ function renderTable(data) {
     const cStatus = item.rating_change_status || "NEW";
     const cLabel = item.rating_change_label || "신규";
     if (cStatus === "UPGRADE") {
-      changeBadge = `<span class="change-badge upgrade">${cLabel}</span>`;
+      changeBadge = `<span class="change-badge upgrade">${escapeHtml(cLabel)}</span>`;
     } else if (cStatus === "DOWNGRADE") {
-      changeBadge = `<span class="change-badge downgrade">${cLabel}</span>`;
+      changeBadge = `<span class="change-badge downgrade">${escapeHtml(cLabel)}</span>`;
     } else if (cStatus === "MAINTAIN") {
       changeBadge = `<span class="change-badge maintain">유지</span>`;
     } else if (cStatus === "NEW") {
@@ -552,27 +573,27 @@ function renderTable(data) {
 
     // 4. 각 평가사별 등급/전망 콤팩트 카드 및 확정일
     const krGrd = formatAgencyRatingCell(item.kr_rating, item.kr_rating_type, item.kr_outlook, item.kr_status);
-    const krDt = item.kr_date ? `<span class="mono cell-date">${item.kr_date}</span>` : `<span style="color:var(--text-dim)">-</span>`;
+    const krDt = item.kr_date ? `<span class="mono cell-date">${escapeHtml(item.kr_date)}</span>` : `<span style="color:var(--text-dim)">-</span>`;
 
     const kisGrd = formatAgencyRatingCell(item.kis_rating, item.kis_rating_type, item.kis_outlook, item.kis_status);
-    const kisDt = item.kis_date ? `<span class="mono cell-date">${item.kis_date}</span>` : `<span style="color:var(--text-dim)">-</span>`;
+    const kisDt = item.kis_date ? `<span class="mono cell-date">${escapeHtml(item.kis_date)}</span>` : `<span style="color:var(--text-dim)">-</span>`;
 
     const niceGrd = formatAgencyRatingCell(item.nice_rating, item.nice_rating_type, item.nice_outlook, item.nice_status);
-    const niceDt = item.nice_date ? `<span class="mono cell-date">${item.nice_date}</span>` : `<span style="color:var(--text-dim)">-</span>`;
+    const niceDt = item.nice_date ? `<span class="mono cell-date">${escapeHtml(item.nice_date)}</span>` : `<span style="color:var(--text-dim)">-</span>`;
     const isLiveUpdated = liveUpdatedIds.has(item.institution_id);
     const rowClass = isLiveUpdated ? 'row-live-updated' : '';
 
     return `
       <tr class="${rowClass}">
         <td class="col-center">
-          <input type="checkbox" class="row-checkbox" data-id="${item.institution_id}" ${isChecked ? 'checked' : ''}>
+          <input type="checkbox" class="row-checkbox" data-id="${escapeHtml(item.institution_id)}" ${isChecked ? 'checked' : ''}>
         </td>
         <td class="col-center">
           <span class="tag-industry">${getIndustryName(item.industry_type)}</span>
         </td>
         <td>
           <div class="cell-inst-name">
-            <strong>${item.institution_name}</strong>
+            <strong>${escapeHtml(item.institution_name)}</strong>
           </div>
         </td>
         <!-- 최종 결정 등급 (전월, 당월, 변동) -->
@@ -591,14 +612,14 @@ function renderTable(data) {
         <!-- 수집상태 및 재조회 -->
         <td class="col-center">
           <div class="status-cell-wrapper">
-            <span class="status-badge ${item.overall_status}">${getStatusName(item.overall_status)}</span>
-            <button class="btn-action-sync" onclick="syncSingleInstitution('${item.institution_id}', this)" title="${item.institution_name} 신용등급 실시간 재조회/동기화">
+            <span class="status-badge ${escapeHtml(item.overall_status)}">${getStatusName(item.overall_status)}</span>
+            <button class="btn-action-sync" data-id="${escapeHtml(item.institution_id)}" onclick="syncSingleInstitution(this.dataset.id, this)" title="${escapeHtml(item.institution_name)} 신용등급 실시간 재조회/동기화">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
             </button>
           </div>
         </td>
         <td class="col-center">
-          <button class="btn-action-icon" onclick="openDetailModal('${item.institution_id}')" title="상세 검증 보기">
+          <button class="btn-action-icon" data-id="${escapeHtml(item.institution_id)}" onclick="openDetailModal(this.dataset.id)" title="상세 검증 보기">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
           </button>
         </td>
@@ -677,7 +698,7 @@ async function loadHistoryMonths() {
 
     const currentSelected = select.value;
     select.innerHTML = months.map(m => `
-      <option value="${m}" ${m === currentSelected ? 'selected' : ''}>${m} 확정 내역</option>
+      <option value="${escapeHtml(m)}" ${m === currentSelected ? 'selected' : ''}>${escapeHtml(m)} 확정 내역</option>
     `).join("");
 
     // 첫 번째 항목 자동 로드
@@ -805,29 +826,29 @@ function renderHistoryTable(data) {
 
   tbody.innerHTML = data.map((item, idx) => {
     const prevBadge = item.prev_final_rating 
-      ? `<span class="rating-badge prev mono" style="background:rgba(148,163,184,0.12); color:#94a3b8; font-weight:600;">${item.prev_final_rating}</span>`
+      ? `<span class="rating-badge prev mono" style="background:rgba(148,163,184,0.12); color:#94a3b8; font-weight:600;">${escapeHtml(item.prev_final_rating)}</span>`
       : `<span style="color:var(--text-dim)">-</span>`;
 
     const finalBadge = item.final_rating 
-      ? `<span class="rating-badge final mono">${item.final_rating}</span>` 
+      ? `<span class="rating-badge final mono">${escapeHtml(item.final_rating)}</span>`
       : `<span style="color:var(--text-dim)">-</span>`;
 
     let changeBadge = `<span style="color:var(--text-dim)">-</span>`;
     const cStatus = item.rating_change_status || "NEW";
     const cLabel = item.rating_change_label || "신규";
-    if (cStatus === "UPGRADE") changeBadge = `<span class="change-badge upgrade">${cLabel}</span>`;
-    else if (cStatus === "DOWNGRADE") changeBadge = `<span class="change-badge downgrade">${cLabel}</span>`;
+    if (cStatus === "UPGRADE") changeBadge = `<span class="change-badge upgrade">${escapeHtml(cLabel)}</span>`;
+    else if (cStatus === "DOWNGRADE") changeBadge = `<span class="change-badge downgrade">${escapeHtml(cLabel)}</span>`;
     else if (cStatus === "MAINTAIN") changeBadge = `<span class="change-badge maintain">유지</span>`;
     else if (cStatus === "NEW") changeBadge = `<span class="change-badge new">신규</span>`;
 
     const krGrd = formatAgencyRatingCell(item.kr_rating, item.kr_rating_type, item.kr_outlook, item.kr_status);
-    const krDt = item.kr_date ? `<span class="mono cell-date">${item.kr_date}</span>` : `<span style="color:var(--text-dim)">-</span>`;
+    const krDt = item.kr_date ? `<span class="mono cell-date">${escapeHtml(item.kr_date)}</span>` : `<span style="color:var(--text-dim)">-</span>`;
 
     const kisGrd = formatAgencyRatingCell(item.kis_rating, item.kis_rating_type, item.kis_outlook, item.kis_status);
-    const kisDt = item.kis_date ? `<span class="mono cell-date">${item.kis_date}</span>` : `<span style="color:var(--text-dim)">-</span>`;
+    const kisDt = item.kis_date ? `<span class="mono cell-date">${escapeHtml(item.kis_date)}</span>` : `<span style="color:var(--text-dim)">-</span>`;
 
     const niceGrd = formatAgencyRatingCell(item.nice_rating, item.nice_rating_type, item.nice_outlook, item.nice_status);
-    const niceDt = item.nice_date ? `<span class="mono cell-date">${item.nice_date}</span>` : `<span style="color:var(--text-dim)">-</span>`;
+    const niceDt = item.nice_date ? `<span class="mono cell-date">${escapeHtml(item.nice_date)}</span>` : `<span style="color:var(--text-dim)">-</span>`;
 
     return `
       <tr>
@@ -837,7 +858,7 @@ function renderHistoryTable(data) {
         </td>
         <td>
           <div class="cell-inst-name">
-            <strong>${item.institution_name}</strong>
+            <strong>${escapeHtml(item.institution_name)}</strong>
           </div>
         </td>
         <td class="col-center">${prevBadge}</td>
@@ -850,7 +871,7 @@ function renderHistoryTable(data) {
         <td class="col-center">${niceGrd}</td>
         <td class="col-center">${niceDt}</td>
         <td class="col-center">
-          <span class="status-badge ${item.overall_status}">${getStatusName(item.overall_status)}</span>
+          <span class="status-badge ${escapeHtml(item.overall_status)}">${getStatusName(item.overall_status)}</span>
         </td>
       </tr>
     `;
@@ -876,7 +897,7 @@ function getIndustryName(code) {
     LIFE_INSURANCE: "생명보험",
     NON_LIFE_INSURANCE: "손해보험"
   };
-  return map[code] || code;
+  return map[code] || escapeHtml(code || "");
 }
 
 function getRatingTypeBadge(code, name) {
@@ -884,7 +905,7 @@ function getRatingTypeBadge(code, name) {
   let color = "#38bdf8";
   if (code === "INSURANCE_FINANCIAL_STRENGTH") color = "#c084fc";
   else if (code === "SENIOR_BOND") color = "#34d399";
-  return `<span style="font-size:0.7rem; color:${color}; background:rgba(255,255,255,0.05); padding:1px 6px; border-radius:4px;">${label}</span>`;
+  return `<span style="font-size:0.7rem; color:${color}; background:rgba(255,255,255,0.05); padding:1px 6px; border-radius:4px;">${escapeHtml(label)}</span>`;
 }
 
 function getRatingTypeName(code) {
@@ -893,7 +914,7 @@ function getRatingTypeName(code) {
     SENIOR_BOND: "선순위회사채",
     INSURANCE_FINANCIAL_STRENGTH: "보험지급능력"
   };
-  return map[code] || code;
+  return map[code] || escapeHtml(code || "");
 }
 
 function getStatusName(code) {
@@ -906,7 +927,7 @@ function getStatusName(code) {
     PARSING_ERROR: "파싱오류",
     MAPPING_REQUIRED: "매칭필요"
   };
-  return map[code] || code;
+  return map[code] || escapeHtml(code || "");
 }
 
 // 8. 이벤트 바인딩
@@ -1137,7 +1158,7 @@ async function saveExcelWithPicker(blob, defaultFileName) {
       progressCard.style.display = "block";
       document.getElementById("progressBarFill").style.width = "3%";
       document.getElementById("progressPercent").textContent = "시작 중...";
-      document.getElementById("progressCurrentInst").textContent = "전체 기관(85개) 조사 준비 중...";
+      document.getElementById("progressCurrentInst").textContent = `전체 기관(${allRatingsData.length || ""}개) 조사 준비 중...`;
     }
 
     wasJobRunning = true;
@@ -1148,6 +1169,19 @@ async function saveExcelWithPicker(blob, defaultFileName) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ execution_type: "MANUAL_ALL" })
       });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        alert(errData.detail || "조사 시작에 실패했습니다.");
+        wasJobRunning = false;
+        isJobCurrentlyRunning = false;
+        runBtn.disabled = false;
+        runBtn.innerHTML = `
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+          전체 조사 실행
+        `;
+        if (progressCard) progressCard.style.display = "none";
+        return;
+      }
       setTimeout(checkJobStatus, 300);
     } catch (err) {
       console.error("서버 통신 실패:", err);
@@ -1185,6 +1219,18 @@ async function saveExcelWithPicker(blob, defaultFileName) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ execution_type: "MANUAL_SELECT", institution_ids: ids })
       });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        alert(errData.detail || "선택 조사 시작에 실패했습니다.");
+        wasJobRunning = false;
+        runSelectedBtn.disabled = false;
+        runSelectedBtn.innerHTML = `
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+          선택 조사 (<span id="selectedCount">${ids.length}</span>)
+        `;
+        if (progressCard) progressCard.style.display = "none";
+        return;
+      }
       setTimeout(checkJobStatus, 300);
     } catch (err) {
       console.error("서버 통신 실패:", err);
@@ -1249,6 +1295,22 @@ async function saveExcelWithPicker(blob, defaultFileName) {
   const btnSubmitRetryErrors = document.getElementById("btnSubmitRetryErrors");
   if (btnSubmitRetryErrors) btnSubmitRetryErrors.addEventListener("click", executeRetryErrors);
 
+  // 수집 작업 상세 로그 모달 이벤트
+  const btnOpenJobLogs = document.getElementById("btnOpenJobLogs");
+  if (btnOpenJobLogs) btnOpenJobLogs.addEventListener("click", () => openJobLogsModal());
+
+  const jobLogSelect = document.getElementById("jobLogSelect");
+  if (jobLogSelect) jobLogSelect.addEventListener("change", (e) => loadJobLogs(e.target.value));
+
+  const jobLogAgencyFilter = document.getElementById("jobLogAgencyFilter");
+  if (jobLogAgencyFilter) jobLogAgencyFilter.addEventListener("change", applyJobLogFiltersAndRender);
+
+  const jobLogStatusFilter = document.getElementById("jobLogStatusFilter");
+  if (jobLogStatusFilter) jobLogStatusFilter.addEventListener("change", applyJobLogFiltersAndRender);
+
+  const jobLogSearchInput = document.getElementById("jobLogSearchInput");
+  if (jobLogSearchInput) jobLogSearchInput.addEventListener("input", applyJobLogFiltersAndRender);
+
   // 3번 탭 (상품제공기관 관리) 이벤트
   const manageSearch = document.getElementById("manageSearchInput");
   if (manageSearch) manageSearch.addEventListener("input", applyManageFilters);
@@ -1305,7 +1367,7 @@ function openRetryErrorsModal() {
   if (listEl) {
     listEl.innerHTML = errorItems.map(item => `
       <span style="background:rgba(239,68,68,0.15); color:#fca5a5; border:1px solid rgba(239,68,68,0.3); border-radius:4px; padding:3px 8px; font-weight:600; display:inline-flex; align-items:center; gap:4px;">
-        ${item.institution_name}
+        ${escapeHtml(item.institution_name)}
         <span style="font-size:0.7rem; color:var(--text-dim);">(${getIndustryName(item.industry_type)})</span>
       </span>
     `).join("");
@@ -1350,14 +1412,24 @@ async function executeRetryErrors() {
   wasJobRunning = true;
   try {
     showToast(`수집오류/확인필요 대상 ${ids.length}개 기관 선별 재조회를 시작합니다...`, true);
-    await fetch("/api/v1/collector/run", {
+    const res = await fetch("/api/v1/collector/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ execution_type: "MANUAL_SELECT", institution_ids: ids })
     });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      showToast(errData.detail || "선별 재조회 시작에 실패했습니다.", false);
+      wasJobRunning = false;
+      if (progressCard) progressCard.style.display = "none";
+      return;
+    }
     setTimeout(checkJobStatus, 300);
   } catch (err) {
     console.error("선별 재조회 요청 실패:", err);
+    showToast("네트워크 오류로 선별 재조회를 시작하지 못했습니다.", false);
+    wasJobRunning = false;
+    if (progressCard) progressCard.style.display = "none";
     setTimeout(checkJobStatus, 300);
   }
 }
@@ -1401,6 +1473,10 @@ async function openDetailModal(id) {
     const res = await fetch(`/api/v1/ratings/${id}/detail`);
     const detail = res.ok ? await res.json() : item;
 
+    const s1 = (detail.search_name_1 !== undefined && detail.search_name_1 !== null) ? detail.search_name_1 : (item.search_name_1 || item.institution_name);
+    const s2 = (detail.search_name_2 !== undefined && detail.search_name_2 !== null) ? detail.search_name_2 : (item.search_name_2 || '');
+    const s3 = (detail.search_name_3 !== undefined && detail.search_name_3 !== null) ? detail.search_name_3 : (item.search_name_3 || '');
+
     const agencies = detail.agencies || [
       { agency_code: "KR", agency_name: "한국기업평가", rating: item.kr_rating, rating_date: item.kr_date, status: item.kr_status, source_url: item.kr_url },
       { agency_code: "KIS", agency_name: "한국신용평가", rating: item.kis_rating, rating_date: item.kis_date, status: item.kis_status, source_url: item.kis_url },
@@ -1414,7 +1490,7 @@ async function openDetailModal(id) {
           <span style="margin-left:8px;">${getRatingTypeBadge(item.rating_type, item.rating_type_name)}</span>
         </div>
         <div style="font-size:0.8rem; color:var(--text-dim);">
-          기관코드: <span class="mono">${item.institution_id}</span>
+          기관코드: <span class="mono">${escapeHtml(item.institution_id)}</span>
         </div>
       </div>
 
@@ -1422,37 +1498,37 @@ async function openDetailModal(id) {
       <div style="background:rgba(15,23,42,0.7); border:1px solid var(--border-color); border-radius:10px; padding:14px 16px; margin-bottom:16px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
           <span style="font-size:0.84rem; font-weight:700; color:var(--text-main);">🔍 평가사 검색어 관리 & 즉시 재조회</span>
-          <button id="btnSaveSearchSync" class="btn btn-primary" style="padding:4px 12px; font-size:0.78rem;" onclick="saveSearchNamesAndSync('${item.institution_id}')">
+          <button id="btnSaveSearchSync" class="btn btn-primary" style="padding:4px 12px; font-size:0.78rem;" data-id="${escapeHtml(item.institution_id)}" onclick="saveSearchNamesAndSync(this.dataset.id)">
             저장 및 즉시 재조회 ⚡
           </button>
         </div>
         <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; margin-bottom:10px;">
           <div>
             <label style="font-size:0.72rem; color:var(--text-muted); display:block; margin-bottom:3px;">1순위 검색어 (우선)</label>
-            <input type="text" id="editSearchName1" value="${item.search_name_1 || item.institution_name}" class="custom-select" style="width:100%; padding:6px 10px; font-size:0.82rem; font-weight:600; color:var(--primary);">
+            <input type="text" id="editSearchName1" value="${escapeHtml(s1 || '')}" class="custom-select" style="width:100%; padding:6px 10px; font-size:0.82rem; font-weight:600; color:var(--primary);">
           </div>
           <div>
             <label style="font-size:0.72rem; color:var(--text-muted); display:block; margin-bottom:3px;">2순위 검색어 (차선)</label>
-            <input type="text" id="editSearchName2" value="${item.search_name_2 || ''}" placeholder="차선 검색어 없음" class="custom-select" style="width:100%; padding:6px 10px; font-size:0.82rem; color:#c084fc;">
+            <input type="text" id="editSearchName2" value="${escapeHtml(s2 || '')}" placeholder="차선 검색어 없음" class="custom-select" style="width:100%; padding:6px 10px; font-size:0.82rem; color:#c084fc;">
           </div>
           <div>
             <label style="font-size:0.72rem; color:var(--text-muted); display:block; margin-bottom:3px;">3순위 검색어 (추가확장)</label>
-            <input type="text" id="editSearchName3" value="${item.search_name_3 || ''}" placeholder="추가 검색어 없음" class="custom-select" style="width:100%; padding:6px 10px; font-size:0.82rem; color:#34d399;">
+            <input type="text" id="editSearchName3" value="${escapeHtml(s3 || '')}" placeholder="추가 검색어 없음" class="custom-select" style="width:100%; padding:6px 10px; font-size:0.82rem; color:#34d399;">
           </div>
         </div>
         <div style="display:flex; gap:12px; color:var(--text-dim); font-size:0.74rem;">
           <span>평가사별 조사항목:</span>
-          <span>한기평: <strong style="color:var(--text-main);">${item.kr_target_rating || "-"}</strong></span>
-          <span>· 한신평: <strong style="color:var(--text-main);">${item.kis_target_rating || "-"}</strong></span>
-          <span>· NICE: <strong style="color:var(--text-main);">${item.nice_target_rating || "-"}</strong></span>
+          <span>한기평: <strong style="color:var(--text-main);">${escapeHtml(item.kr_target_rating || "-")}</strong></span>
+          <span>· 한신평: <strong style="color:var(--text-main);">${escapeHtml(item.kis_target_rating || "-")}</strong></span>
+          <span>· NICE: <strong style="color:var(--text-main);">${escapeHtml(item.nice_target_rating || "-")}</strong></span>
         </div>
       </div>
 
       <div style="background:rgba(15,23,42,0.8); border:1px solid var(--border-color); border-radius:10px; padding:18px; margin-bottom:20px; text-align:center;">
         <div style="font-size:0.82rem; color:var(--text-muted); font-weight:600;">최종 결정 신용등급 (최저등급 산출)</div>
-        <div style="font-size:2.4rem; font-weight:800; color:var(--primary); margin:6px 0;" class="mono">${item.final_rating || "-"}</div>
+        <div style="font-size:2.4rem; font-weight:800; color:var(--primary); margin:6px 0;" class="mono">${escapeHtml(detail.final_rating || item.final_rating || "-")}</div>
         <div style="font-size:0.8rem; color:var(--text-dim); background:rgba(255,255,255,0.03); display:inline-block; padding:4px 12px; border-radius:20px;">
-          산출 근거: <strong>${item.calculation_logic || "등급 산출 내역 없음"}</strong>
+          산출 근거: <strong>${escapeHtml(detail.calculation_logic || item.calculation_logic || "등급 산출 내역 없음")}</strong>
         </div>
       </div>
 
@@ -1464,8 +1540,9 @@ async function openDetailModal(id) {
         ${agencies.map(ag => {
           const hasRating = ag.rating && ag.status !== 'NO_RATING';
           const rawRatingStr = ag.raw_rating && ag.raw_rating !== ag.rating ? `(원문: ${ag.raw_rating})` : '';
-          const linkBtn = ag.source_url 
-            ? `<a href="${ag.source_url}" target="_blank" rel="noopener noreferrer" class="agency-link-btn">
+          const safeUrl = (ag.source_url && (ag.source_url.startsWith('https://') || ag.source_url.startsWith('http://'))) ? escapeHtml(encodeURI(ag.source_url)) : null;
+          const linkBtn = safeUrl
+            ? `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="agency-link-btn">
                  공시 원본 확인 ↗
                </a>`
             : `<span class="agency-link-btn disabled">공시 링크 없음</span>`;
@@ -1474,16 +1551,16 @@ async function openDetailModal(id) {
             <div class="agency-verify-card">
               <div>
                 <div class="agency-verify-header">
-                  <span class="agency-verify-title">${ag.agency_name}</span>
-                  <span class="status-badge ${ag.status}" style="font-size:0.68rem; padding:1px 5px;">${getStatusName(ag.status)}</span>
+                  <span class="agency-verify-title">${escapeHtml(ag.agency_name)}</span>
+                  <span class="status-badge ${escapeHtml(ag.status)}" style="font-size:0.68rem; padding:1px 5px;">${getStatusName(ag.status)}</span>
                 </div>
                 <div class="agency-verify-rating mono" style="color: ${hasRating ? 'var(--text-main)' : 'var(--text-dim)'};">
-                  ${ag.rating || "-"}
+                  ${escapeHtml(ag.rating || "-")}
                 </div>
                 <div class="agency-verify-meta">
-                  ${rawRatingStr ? `<div style="color:var(--primary); font-size:0.7rem;">${rawRatingStr}</div>` : ''}
-                  <div>확정일: <span class="mono">${ag.rating_date || "-"}</span></div>
-                  ${ag.valid_to ? `<div>만료일: <span class="mono">${ag.valid_to}</span></div>` : ''}
+                  ${rawRatingStr ? `<div style="color:var(--primary); font-size:0.7rem;">${escapeHtml(rawRatingStr)}</div>` : ''}
+                  <div>확정일: <span class="mono">${escapeHtml(ag.rating_date || "-")}</span></div>
+                  ${ag.valid_to ? `<div>만료일: <span class="mono">${escapeHtml(ag.valid_to)}</span></div>` : ''}
                 </div>
               </div>
               ${linkBtn}
@@ -1588,7 +1665,8 @@ function applyManageFilters() {
       (item.institution_name && item.institution_name.toLowerCase().includes(search)) ||
       (item.institution_id && item.institution_id.toLowerCase().includes(search)) ||
       (item.search_name_1 && item.search_name_1.toLowerCase().includes(search)) ||
-      (item.search_name_2 && item.search_name_2.toLowerCase().includes(search));
+      (item.search_name_2 && item.search_name_2.toLowerCase().includes(search)) ||
+      (item.search_name_3 && item.search_name_3.toLowerCase().includes(search));
 
     const matchesInd = industry === "ALL" || item.industry_type === industry;
     const matchesUse = useYn === "ALL" || item.use_yn === useYn;
@@ -1615,34 +1693,34 @@ function renderInstitutionsTable(data) {
       ? `<span class="status-badge SUCCESS" style="font-size:0.72rem; padding:2px 6px;">사용중</span>`
       : `<span class="status-badge NO_RATING" style="font-size:0.72rem; padding:2px 6px;">미사용</span>`;
 
-    const memoStr = item.memo ? `<span style="font-size:0.78rem; color:var(--text-muted);">${item.memo}</span>` : `<span style="color:var(--text-dim);">-</span>`;
+    const memoStr = item.memo ? `<span style="font-size:0.78rem; color:var(--text-muted);">${escapeHtml(item.memo)}</span>` : `<span style="color:var(--text-dim);">-</span>`;
 
     return `
       <tr>
-        <td class="col-center mono" style="font-size:0.8rem; color:var(--text-dim);">${item.institution_id}</td>
+        <td class="col-center mono" style="font-size:0.8rem; color:var(--text-dim);">${escapeHtml(item.institution_id)}</td>
         <td class="col-center">
           <span class="tag-industry">${getIndustryName(item.industry_type)}</span>
         </td>
         <td>
-          <strong style="color:var(--text-main); font-size:0.9rem;">${item.institution_name}</strong>
+          <strong style="color:var(--text-main); font-size:0.9rem;">${escapeHtml(item.institution_name)}</strong>
           ${item.user_modified ? `<span style="font-size:0.68rem; color:#38bdf8; background:rgba(56,189,248,0.1); border-radius:3px; padding:1px 4px; margin-left:4px;">화면수정</span>` : ''}
         </td>
-        <td class="col-center mono" style="color:var(--primary); font-size:0.82rem; font-weight:600;">${item.search_name_1 || "-"}</td>
-        <td class="col-center mono" style="color:#c084fc; font-size:0.82rem;">${item.search_name_2 || "-"}</td>
-        <td class="col-center mono" style="color:#34d399; font-size:0.82rem;">${item.search_name_3 || "-"}</td>
+        <td class="col-center mono" style="color:var(--primary); font-size:0.82rem; font-weight:600;">${escapeHtml(item.search_name_1 || "-")}</td>
+        <td class="col-center mono" style="color:#c084fc; font-size:0.82rem;">${escapeHtml(item.search_name_2 || "-")}</td>
+        <td class="col-center mono" style="color:#34d399; font-size:0.82rem;">${escapeHtml(item.search_name_3 || "-")}</td>
         <td style="font-size:0.75rem;">
           <div style="display:flex; flex-direction:column; gap:2px; line-height:1.2;">
-            <div><span style="color:#60a5fa; font-weight:700; font-size:0.7rem;">KR:</span> <span style="color:var(--text-main);">${item.kr_target_rating || "-"}</span></div>
-            <div><span style="color:#f59e0b; font-weight:700; font-size:0.7rem;">KIS:</span> <span style="color:var(--text-main);">${item.kis_target_rating || "-"}</span></div>
-            <div><span style="color:#10b981; font-weight:700; font-size:0.7rem;">NICE:</span> <span style="color:var(--text-main);">${item.nice_target_rating || "-"}</span></div>
+            <div><span style="color:#60a5fa; font-weight:700; font-size:0.7rem;">KR:</span> <span style="color:var(--text-main);">${escapeHtml(item.kr_target_rating || "-")}</span></div>
+            <div><span style="color:#f59e0b; font-weight:700; font-size:0.7rem;">KIS:</span> <span style="color:var(--text-main);">${escapeHtml(item.kis_target_rating || "-")}</span></div>
+            <div><span style="color:#10b981; font-weight:700; font-size:0.7rem;">NICE:</span> <span style="color:var(--text-main);">${escapeHtml(item.nice_target_rating || "-")}</span></div>
           </div>
         </td>
         <td>${memoStr}</td>
         <td class="col-center">${useBadge}</td>
         <td class="col-center">
           <div style="display:inline-flex; gap:6px;">
-            <button class="btn btn-secondary" style="padding:3px 8px; font-size:0.72rem;" onclick="openEditInstitutionModal('${item.institution_id}')">수정</button>
-            <button class="btn btn-outline" style="padding:3px 8px; font-size:0.72rem; color:var(--danger); border-color:rgba(239,68,68,0.4);" onclick="deleteInstitution('${item.institution_id}', '${item.institution_name}')">삭제</button>
+            <button class="btn btn-secondary" style="padding:3px 8px; font-size:0.72rem;" data-id="${escapeHtml(item.institution_id)}" onclick="openEditInstitutionModal(this.dataset.id)">수정</button>
+            <button class="btn btn-outline" style="padding:3px 8px; font-size:0.72rem; color:var(--danger); border-color:rgba(239,68,68,0.4);" data-id="${escapeHtml(item.institution_id)}" onclick="deleteInstitution(this.dataset.id)">삭제</button>
           </div>
         </td>
       </tr>
@@ -1790,7 +1868,9 @@ async function submitInstitutionForm() {
   }
 }
 
-async function deleteInstitution(id, name) {
+async function deleteInstitution(id) {
+  const inst = (allInstitutionsData || []).find(x => x.institution_id === id);
+  const name = inst ? inst.institution_name : id;
   if (!confirm(`정말로 '${name}' 기관을 비활성화(미사용 처리)하시겠습니까?\n이후 등급 조사 대상에서 제외됩니다.`)) {
     return;
   }
@@ -1816,4 +1896,186 @@ document.getElementById("instFormIndustry")?.addEventListener("change", (e) => {
     updateDefaultRatingTypesByIndustry(e.target.value);
   }
 });
+
+// ==========================================
+// 12. 수집 작업 상세 로그 모달 (Collection Job Logs)
+// ==========================================
+let allJobLogsHistory = [];
+let currentJobLogsData = [];
+
+async function openJobLogsModal(targetJobId = null) {
+  const modal = document.getElementById("jobLogsModal");
+  if (!modal) return;
+  modal.classList.add("active");
+
+  const select = document.getElementById("jobLogSelect");
+  const tbody = document.getElementById("jobLogTableBody");
+  if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="empty-row"><span class="pulse-indicator"></span> 최근 수집 작업 목록을 불러오는 중...</td></tr>`;
+
+  try {
+    const res = await fetch("/api/v1/logs/jobs?limit=25");
+    if (!res.ok) throw new Error("작업 목록 조회 실패");
+    allJobLogsHistory = await res.json();
+
+    if (!allJobLogsHistory || allJobLogsHistory.length === 0) {
+      if (select) select.innerHTML = `<option value="">수집 작업 이력이 없습니다.</option>`;
+      if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="empty-row">기록된 수집 작업이 없습니다.</td></tr>`;
+      return;
+    }
+
+    if (select) {
+      select.innerHTML = allJobLogsHistory.map(j => {
+        const started = j.started_at ? new Date(j.started_at).toLocaleString("ko-KR") : "-";
+        const typeStr = j.execution_type === "MANUAL_ALL" ? "전체조사" : (j.execution_type === "MANUAL_SELECT" ? "선택조사" : "자동스케줄");
+        const statusBadge = j.status === "SUCCESS" ? "성공" : (j.status === "STOPPED" ? "중단됨" : (j.status === "RUNNING" ? "진행중" : "실패"));
+        return `<option value="${escapeHtml(j.job_id)}">${started} | ${typeStr} | ${j.total_count}건 (${statusBadge})</option>`;
+      }).join("");
+
+      if (targetJobId && allJobLogsHistory.some(x => x.job_id === targetJobId)) {
+        select.value = targetJobId;
+      }
+    }
+
+    const selectedJobId = select ? select.value : allJobLogsHistory[0].job_id;
+    if (selectedJobId) {
+      await loadJobLogs(selectedJobId);
+    }
+  } catch (err) {
+    console.error("수집 작업 이력 로드 실패:", err);
+    if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="empty-row" style="color:var(--danger);">로그 목록을 불러오지 못했습니다: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+async function loadJobLogs(jobId) {
+  if (!jobId) return;
+  const tbody = document.getElementById("jobLogTableBody");
+  if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="empty-row"><span class="pulse-indicator"></span> [${escapeHtml(jobId)}] 상세 로그를 불러오는 중입니다...</td></tr>`;
+
+  // 작업 메타 정보 요약 바 갱신
+  const jobMeta = allJobLogsHistory.find(j => j.job_id === jobId);
+  if (jobMeta) {
+    const elStatus = document.getElementById("jobLogJobStatus");
+    const elTotal = document.getElementById("jobLogJobTotal");
+    const elSuccess = document.getElementById("jobLogJobSuccess");
+    const elNoRating = document.getElementById("jobLogJobNoRating");
+    const elError = document.getElementById("jobLogJobError");
+    const elStarted = document.getElementById("jobLogJobStarted");
+
+    if (elStatus) elStatus.textContent = jobMeta.status || "-";
+    if (elTotal) elTotal.textContent = jobMeta.total_count || 0;
+    if (elSuccess) elSuccess.textContent = jobMeta.success_count || 0;
+    if (elNoRating) elNoRating.textContent = jobMeta.no_rating_count || 0;
+    if (elError) elError.textContent = (jobMeta.error_count || 0) + (jobMeta.manual_check_count || 0);
+    if (elStarted && jobMeta.started_at) elStarted.textContent = new Date(jobMeta.started_at).toLocaleString("ko-KR");
+  }
+
+  try {
+    const res = await fetch(`/api/v1/logs/${encodeURIComponent(jobId)}/details`);
+    if (!res.ok) {
+      currentJobLogsData = [];
+      if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="empty-row">해당 작업의 세부 로그가 없습니다.</td></tr>`;
+      const badge = document.getElementById("jobLogTotalBadge");
+      if (badge) badge.textContent = "0건";
+      return;
+    }
+
+    currentJobLogsData = await res.json();
+    applyJobLogFiltersAndRender();
+  } catch (err) {
+    console.error("작업 상세 로그 로드 실패:", err);
+    if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="empty-row" style="color:var(--danger);">상세 로그를 불러오지 못했습니다: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+function applyJobLogFiltersAndRender() {
+  const agencyFilter = document.getElementById("jobLogAgencyFilter")?.value || "ALL";
+  const statusFilter = document.getElementById("jobLogStatusFilter")?.value || "ALL";
+  const search = (document.getElementById("jobLogSearchInput")?.value || "").trim().toLowerCase();
+
+  const filtered = (currentJobLogsData || []).filter(item => {
+    if (agencyFilter !== "ALL" && item.agency_code !== agencyFilter) return false;
+
+    if (statusFilter === "SUCCESS" && item.status !== "SUCCESS") return false;
+    if (statusFilter === "NO_RATING" && item.status !== "NO_RATING") return false;
+    if (statusFilter === "ERROR" && (item.status === "SUCCESS" || item.status === "NO_RATING")) return false;
+
+    if (search) {
+      const name = (item.institution_name || "").toLowerCase();
+      const code = (item.institution_id || "").toLowerCase();
+      if (!name.includes(search) && !code.includes(search)) return false;
+    }
+    return true;
+  });
+
+  const badge = document.getElementById("jobLogTotalBadge");
+  if (badge) badge.textContent = `${filtered.length}건`;
+
+  renderJobLogTable(filtered);
+}
+
+function renderJobLogTable(logs) {
+  const tbody = document.getElementById("jobLogTableBody");
+  if (!tbody) return;
+
+  if (!logs || logs.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" class="empty-row">조건에 맞는 수집 로그가 없습니다.</td></tr>`;
+    return;
+  }
+
+  const agencyNames = { KR: "한기평", KIS: "한신평", NICE: "NICE" };
+  const agencyColors = { KR: "#60a5fa", KIS: "#f59e0b", NICE: "#10b981" };
+
+  tbody.innerHTML = logs.map((log, idx) => {
+    // 소요 시간 계산
+    let elapsedStr = "-";
+    if (log.started_at && log.finished_at) {
+      const diffMs = new Date(log.finished_at) - new Date(log.started_at);
+      elapsedStr = diffMs >= 0 ? `${(diffMs / 1000).toFixed(1)}s` : "-";
+    }
+
+    const finishedTime = log.finished_at ? new Date(log.finished_at).toLocaleTimeString("ko-KR") : "-";
+
+    // 상태 배지
+    const statusBadge = `<span class="status-badge ${escapeHtml(log.status)}" style="font-size:0.7rem; padding:2px 6px;">${getStatusName(log.status)}</span>`;
+
+    // 공시 링크 및 메시지
+    const safeUrl = (log.source_url && (log.source_url.startsWith('https://') || log.source_url.startsWith('http://'))) ? escapeHtml(encodeURI(log.source_url)) : null;
+    const linkHtml = safeUrl 
+      ? `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--primary); text-decoration:underline; font-size:0.74rem; margin-left:6px;">공시확인 ↗</a>`
+      : '';
+    const messageHtml = log.message ? `<span style="color:${log.status === 'SUCCESS' ? 'var(--text-muted)' : '#f87171'};">${escapeHtml(log.message)}</span>` : '<span style="color:var(--text-dim);">-</span>';
+
+    const agencyColor = agencyColors[log.agency_code] || "var(--text-main)";
+
+    return `
+      <tr>
+        <td class="col-center mono" style="color:var(--text-dim); font-size:0.75rem;">${idx + 1}</td>
+        <td>
+          <div style="font-weight:600; color:var(--text-main); font-size:0.82rem;">${escapeHtml(log.institution_name || log.institution_id)}</div>
+          <div class="mono" style="font-size:0.7rem; color:var(--text-dim);">${escapeHtml(log.institution_id)}</div>
+        </td>
+        <td class="col-center">
+          <strong style="color:${agencyColor}; font-size:0.78rem;">${log.agency_code}</strong>
+          <div style="font-size:0.68rem; color:var(--text-dim);">${agencyNames[log.agency_code] || ''}</div>
+        </td>
+        <td class="col-center">${statusBadge}</td>
+        <td class="col-center mono" style="font-size:0.75rem; color:var(--text-dim);">${elapsedStr}</td>
+        <td style="font-size:0.78rem;">
+          ${messageHtml} ${linkHtml}
+        </td>
+        <td class="col-center mono" style="font-size:0.75rem; color:var(--text-dim);">${finishedTime}</td>
+      </tr>
+    `;
+  }).join("");
+}
+
+function refreshCurrentJobLogs() {
+  const select = document.getElementById("jobLogSelect");
+  if (select && select.value) {
+    loadJobLogs(select.value);
+  } else {
+    openJobLogsModal();
+  }
+}
+
 

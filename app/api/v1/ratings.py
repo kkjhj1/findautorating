@@ -8,6 +8,7 @@ from app.models.institution import Institution
 from app.models.current_rating import CurrentRating
 from app.models.rating_raw import CreditRatingRaw
 from app.models.monthly_confirmation import MonthlyConfirmedRating
+from app.models.job_log import CollectionJob
 from app.schemas.rating import (
     CurrentRatingResponse,
     CurrentRatingDetailResponse,
@@ -17,6 +18,7 @@ from app.schemas.rating import (
     MonthlyHistorySummary,
     MonthlyConfirmedRatingItem
 )
+from app.jobs.collector_job import _JOB_TRIGGER_LOCK, ACTIVE_JOB_PROGRESS
 
 router = APIRouter(prefix="/ratings", tags=["Ratings"])
 
@@ -39,8 +41,23 @@ def confirm_monthly_ratings(payload: ConfirmRatingRequest, db: Session = Depends
     - 사용자가 화면에서 검토 후 최종 확정을 누를 때 호출됨
     - 동월(base_year_month)에 여러 번 확정 시 기존 내역을 최신 내역으로 덮어씀 (Last-Win)
     """
-    now = datetime.now()
-    target_ym = payload.base_year_month or now.strftime("%Y-%m")
+    with _JOB_TRIGGER_LOCK:
+        now = datetime.now()
+        target_ym = payload.base_year_month or now.strftime("%Y-%m")
+
+        # 0. 진행 중인 수집 작업 및 미완료(COLLECTING) 상태 검증 가드
+        if ACTIVE_JOB_PROGRESS.get("is_running") or ACTIVE_JOB_PROGRESS.get("is_stopping"):
+            raise HTTPException(
+                status_code=400,
+                detail="현재 신용등급 조사가 진행 중이거나 정리 중입니다. 조사가 완전히 완료된 후 확정해 주십시오."
+            )
+
+        running_job = db.query(CollectionJob).filter(CollectionJob.status == "RUNNING").first()
+        if running_job:
+            raise HTTPException(
+                status_code=400,
+                detail="현재 신용등급 조사가 진행 중입니다. 조사가 완전히 완료된 후 확정해 주십시오."
+            )
 
     # 1. 현재 조사된 활성 기관 전체 목록 조회
     current_ratings = db.query(CurrentRating).join(
@@ -49,6 +66,13 @@ def confirm_monthly_ratings(payload: ConfirmRatingRequest, db: Session = Depends
 
     if not current_ratings:
         raise HTTPException(status_code=400, detail="확정할 조사 내역이 없습니다. 먼저 조사를 실행해주세요.")
+
+    collecting_items = [cr for cr in current_ratings if cr.overall_status == "COLLECTING"]
+    if collecting_items:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{len(collecting_items)}개 기관의 조사가 아직 진행 중입니다. 조사가 완료된 후 확정해 주십시오."
+        )
 
     # 2. 동월(base_year_month) 기존 확정 데이터가 있다면 일괄 삭제 (Last-Win: 덮어쓰기)
     deleted_count = db.query(MonthlyConfirmedRating).filter_by(base_year_month=target_ym).delete()
@@ -242,6 +266,7 @@ def get_current_ratings(
             nice_outlook=r.nice_outlook,
             search_name_1=inst.search_name_1,
             search_name_2=inst.search_name_2,
+            search_name_3=inst.search_name_3,
             kr_target_rating=inst.kr_target_rating,
             kis_target_rating=inst.kis_target_rating,
             nice_target_rating=inst.nice_target_rating,
@@ -290,6 +315,7 @@ def get_institution_rating(institution_id: str, db: Session = Depends(get_db)):
         nice_outlook=r.nice_outlook,
         search_name_1=inst.search_name_1,
         search_name_2=inst.search_name_2,
+        search_name_3=inst.search_name_3,
         kr_target_rating=inst.kr_target_rating,
         kis_target_rating=inst.kis_target_rating,
         nice_target_rating=inst.nice_target_rating,
@@ -341,6 +367,9 @@ def get_institution_rating_detail(institution_id: str, db: Session = Depends(get
         final_rating=r.final_rating,
         overall_status=r.overall_status,
         calculation_logic=r.calculation_logic,
+        search_name_1=inst.search_name_1,
+        search_name_2=inst.search_name_2,
+        search_name_3=inst.search_name_3,
         agencies=agencies,
         evaluated_at=r.evaluated_at
     )
@@ -352,9 +381,24 @@ def sync_single_institution(institution_id: str, db: Session = Depends(get_db)):
     - 전체 85개 조사를 기다릴 필요 없이 해당 기관 1건만 즉시 크롤링 및 최저등급 산출
     - CurrentRating 테이블 및 변동 분석 즉시 갱신
     """
-    inst = db.query(Institution).filter_by(institution_id=institution_id).first()
-    if not inst:
-        raise HTTPException(status_code=404, detail="해당 기관을 찾을 수 없습니다.")
+    with _JOB_TRIGGER_LOCK:
+        inst = db.query(Institution).filter_by(institution_id=institution_id).first()
+        if not inst:
+            raise HTTPException(status_code=404, detail="해당 기관을 찾을 수 없습니다.")
+
+        # 0. 배치 수집 작업 진행 중 여부 확인 (동시성 경합 차단)
+        if ACTIVE_JOB_PROGRESS.get("is_running") or ACTIVE_JOB_PROGRESS.get("is_stopping"):
+            raise HTTPException(
+                status_code=409,
+                detail="현재 전체 신용등급 조사가 진행 중이거나 정리 중입니다. 조사가 완료된 후 개별 조사를 실행해 주십시오."
+            )
+
+        running_job = db.query(CollectionJob).filter(CollectionJob.status == "RUNNING").first()
+        if running_job:
+            raise HTTPException(
+                status_code=409,
+                detail="현재 전체 신용등급 조사가 진행 중입니다. 조사가 완료된 후 개별 조사를 실행해 주십시오."
+            )
 
     from app.jobs.collector_job import _collect_for_single_institution
     from app.rating.change_analyzer import analyze_rating_change
@@ -391,7 +435,8 @@ def sync_single_institution(institution_id: str, db: Session = Depends(get_db)):
         search_2=inst.search_name_2 or "",
         targets_dict=targets_dict,
         execution_date_str=today_str,
-        prev_final_rating=prev_rating
+        prev_final_rating=prev_rating,
+        search_3=inst.search_name_3 or ""
     )
 
     # 2. Raw 결과 저장
@@ -451,6 +496,7 @@ def sync_single_institution(institution_id: str, db: Session = Depends(get_db)):
     curr.overall_status = inst_res.calc_result.overall_status
     curr.calculation_logic = inst_res.calc_result.calculation_logic
     curr.evaluated_at = datetime.utcnow()
+    curr.prev_final_rating = prev_rating
 
     # 4. 전월 대비 변동 분석 (prev_final_rating 기준)
     change_status, notch_delta, change_label = analyze_rating_change(
@@ -460,6 +506,19 @@ def sync_single_institution(institution_id: str, db: Session = Depends(get_db)):
     curr.rating_change_status = change_status
     curr.rating_change_notch = notch_delta
     curr.rating_change_label = change_label
+
+    # 등급 변동 이력 감지 및 저장 (PRD 제22조, TC-10 및 단건 감사 증적 보존)
+    if change_status in ["UPGRADE", "DOWNGRADE"] and curr.final_rating:
+        from app.models.rating_history import CreditRatingHistory
+        history_entry = CreditRatingHistory(
+            institution_id=inst.institution_id,
+            agency_code="FINAL",
+            rating_type=inst.rating_type,
+            rating=curr.final_rating,
+            rating_date=datetime.now().strftime("%Y-%m-%d"),
+            recorded_at=datetime.now(timezone.utc)
+        )
+        db.add(history_entry)
 
     db.commit()
     db.refresh(curr)
@@ -499,6 +558,7 @@ def sync_single_institution(institution_id: str, db: Session = Depends(get_db)):
         nice_outlook=curr.nice_outlook,
         search_name_1=inst.search_name_1,
         search_name_2=inst.search_name_2,
+        search_name_3=inst.search_name_3,
         kr_target_rating=inst.kr_target_rating,
         kis_target_rating=inst.kis_target_rating,
         nice_target_rating=inst.nice_target_rating,

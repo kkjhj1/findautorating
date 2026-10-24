@@ -5,6 +5,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from app.models.institution import Institution, AgencyInstitutionMapping
+from app.models.current_rating import CurrentRating
 from app.models.enums import IndustryType, RatingType, AgencyCode
 from app.institution.search_candidates import clean_corporate_affix
 
@@ -116,7 +117,15 @@ def sync_institutions_from_excel(db: Session) -> int:
                 use_yn="Y"
             )
             db.add(inst)
+            # 신규 기관에 대한 CurrentRating 초기 레코드 생성 (대시보드 누락 방지)
+            cr = db.query(CurrentRating).filter_by(institution_id=inst_id).first()
+            if not cr:
+                cr = CurrentRating(institution_id=inst_id)
+                db.add(cr)
         else:
+            # 사용자가 화면에서 직접 수정한 기관인 경우 엑셀 값으로 덮어쓰지 않고 보존
+            if getattr(inst, "user_modified", False):
+                continue
             inst.industry_type = industry_val
             inst.rating_type = r_type
             inst.search_name_1 = raw_s1 or raw_name

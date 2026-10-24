@@ -4,6 +4,8 @@
 
 # Databases & local data (CRITICAL)
 data/*.db
+data/*.db-shm
+data/*.db-wal
 data/*.sqlite
 data/*.sqlite3
 !data/.gitkeep

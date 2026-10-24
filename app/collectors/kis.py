@@ -25,7 +25,7 @@ def _get_kis_client(headers: dict) -> httpx.Client:
                 _KIS_CLIENT = httpx.Client(
                     timeout=_KIS_TIMEOUT,
                     headers=headers,
-                    verify=False,
+                    verify=True,
                     limits=httpx.Limits(max_keepalive_connections=8, max_connections=12)
                 )
     return _KIS_CLIENT
@@ -56,7 +56,7 @@ class KISAdapter(RatingAgencyAdapter):
 
     def health_check(self) -> bool:
         try:
-            with httpx.Client(timeout=_KIS_TIMEOUT, headers=self.headers, verify=False) as client:
+            with httpx.Client(timeout=_KIS_TIMEOUT, headers=self.headers, verify=True) as client:
                 res = client.get(self.base_url)
                 return res.status_code == 200
         except Exception:
@@ -84,7 +84,7 @@ class KISAdapter(RatingAgencyAdapter):
 
         should_close = False
         if client is None:
-            client = httpx.Client(timeout=_KIS_TIMEOUT, headers=self.headers, verify=False)
+            client = httpx.Client(timeout=_KIS_TIMEOUT, headers=self.headers, verify=True)
             should_close = True
 
         try:
@@ -168,7 +168,7 @@ class KISAdapter(RatingAgencyAdapter):
         overview_url = f"{self.base_url}/ratingsSearch/corp_overview.do?kiscd={company.company_id}"
         should_close = False
         if client is None:
-            client = httpx.Client(timeout=_KIS_TIMEOUT, headers=self.headers, verify=False)
+            client = httpx.Client(timeout=_KIS_TIMEOUT, headers=self.headers, verify=True)
             should_close = True
 
         records: List[RawRatingRecord] = []

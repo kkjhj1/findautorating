@@ -18,22 +18,40 @@ async def lifespan(app: FastAPI):
     # Startup: DB 초기화
     init_database()
 
-    # 이전에 비정상 종료되거나 남아있는 좀비 RUNNING 작업 정리 및 엑셀 전산요건 자동 동기화(SSOT)
+    # 1. 엑셀 전산요건 자동 동기화 (SSOT)
     db = SessionLocal()
     try:
         from app.institution.sync import sync_institutions_from_excel
         sync_institutions_from_excel(db)
+    except Exception as exc:
+        db.rollback()
+        print(f"Startup Excel sync warning: {exc}")
+    finally:
+        db.close()
 
-        stale_jobs = db.query(CollectionJob).filter_by(status=JobStatus.RUNNING.value).all()
+    # 2. 이전에 비정상 종료되거나 남아있는 좀비 RUNNING 및 COLLECTING 작업 정리 (완전 독립 세션 보장)
+    db2 = SessionLocal()
+    try:
+        stale_jobs = db2.query(CollectionJob).filter_by(status=JobStatus.RUNNING.value).all()
         for j in stale_jobs:
             j.status = JobStatus.FAILED.value
             j.finished_at = datetime.now(timezone.utc)
-        if stale_jobs:
-            db.commit()
+            j.error_message = "서버 재기동으로 인해 중단됨"
+
+        from app.models.current_rating import CurrentRating
+        from app.models.enums import CollectionStatus
+        stale_collecting = db2.query(CurrentRating).filter_by(overall_status=CollectionStatus.COLLECTING.value).all()
+        for c in stale_collecting:
+            c.overall_status = CollectionStatus.CRAWLING_ERROR.value
+            c.calculation_logic = "서버 재기동으로 인해 조사가 중단되었습니다."
+
+        if stale_jobs or stale_collecting:
+            db2.commit()
     except Exception as exc:
-        print(f"Startup sync warning: {exc}")
+        db2.rollback()
+        print(f"Startup zombie cleanup warning: {exc}")
     finally:
-        db.close()
+        db2.close()
 
     # 사용자가 원할 때만 자동 스케줄러 실행 (기본 False: 100% 수동 실행 모드)
     if settings.ENABLE_AUTO_SCHEDULER:
@@ -52,10 +70,15 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS setup
+# CORS setup (보안: 신뢰할 수 있는 로컬 오리진으로 제한)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost",
+        "http://127.0.0.1"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

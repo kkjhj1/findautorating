@@ -9,7 +9,7 @@ headers = {
     'Referer': 'https://www.korearatings.com/cms/frCmnCon/index.do?MENU_ID=360'
 }
 
-with httpx.Client(timeout=20.0, headers=headers, follow_redirects=True, verify=False) as client:
+with httpx.Client(timeout=20.0, headers=headers, follow_redirects=True, verify=True) as client:
     client.get('https://www.korearatings.com/cms/frCmnCon/index.do?MENU_ID=360')
     
     # 최근 1년 공시 전체 조회

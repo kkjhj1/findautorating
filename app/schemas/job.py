@@ -24,6 +24,7 @@ class LogResponse(BaseModel):
     log_id: int
     job_id: str
     institution_id: str
+    institution_name: Optional[str] = None
     agency_code: str
     status: str
     message: Optional[str] = None

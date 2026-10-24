@@ -10,9 +10,34 @@ scheduler = BackgroundScheduler()
 
 def scheduled_job():
     logger.info("Executing daily scheduled credit rating collection batch...")
-    from app.jobs.collector_job import run_collection_batch
+    from app.jobs.collector_job import (
+        reserve_collection_job,
+        run_collection_batch
+    )
+    from app.api.v1.collector import _JOB_TRIGGER_LOCK
+    from app.core.database import SessionLocal
+
+    db = SessionLocal()
+    job_id = None
     try:
-        job_id = run_collection_batch(execution_type=ExecutionType.SCHEDULED.value)
+        with _JOB_TRIGGER_LOCK:
+            try:
+                job, _ = reserve_collection_job(
+                    db=db,
+                    execution_type=ExecutionType.SCHEDULED.value
+                )
+                job_id = job.job_id
+            except RuntimeError as e:
+                logger.warning(f"스케줄 수집 작업 스킵: {e}")
+                return
+    finally:
+        db.close()
+
+    try:
+        run_collection_batch(
+            execution_type=ExecutionType.SCHEDULED.value,
+            existing_job_id=job_id
+        )
         logger.info(f"Daily collection batch completed. Job ID: {job_id}")
     except Exception as exc:
         logger.error(f"Daily collection batch failed: {str(exc)}")

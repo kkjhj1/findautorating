@@ -20,6 +20,21 @@ def test_generate_search_candidates_priority_order():
     assert cands[0] == "국민은행"
     assert cands[1] == "KB국민은행"
 
+def test_generate_search_candidates_with_search_3():
+    # 1순위: 검색1, 2순위: 검색2, 3순위: 검색3
+    cands = generate_search_candidates(
+        institution_name="현대해상",
+        original_name="현대해상화재보험",
+        agency_code="KR",
+        search_name_1="현대해상",
+        search_name_2="현대해상화재",
+        search_name_3="현대화재"
+    )
+    assert cands[0] == "현대해상"
+    assert cands[1] == "현대해상화재"
+    assert cands[2] == "현대화재"
+    assert "현대해상화재보험" in cands
+
 def test_generate_search_candidates_sc_bank_alias():
     # 공식 법인명 별칭(SC제일은행 <-> 한국스탠다드차타드은행) 자동 포함 확인
     cands = generate_search_candidates(

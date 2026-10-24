@@ -10,7 +10,7 @@ headers = {
 test_targets = ["국민은행", "KB국민은행", "농협은행", "NH농협은행", "삼성화재", "삼성화재해상보험", "메리츠화재"]
 
 print("=== 1. KIS SEARCH TEST ===")
-with httpx.Client(timeout=10.0, headers=headers, verify=False) as client:
+with httpx.Client(timeout=10.0, headers=headers, verify=True) as client:
     client.get("https://www.kisrating.com")
     for q in test_targets:
         payload = {
@@ -29,7 +29,7 @@ with httpx.Client(timeout=10.0, headers=headers, verify=False) as client:
         print(f"KIS query '{q}': {names[:3]}")
 
 print("\n=== 2. NICE SEARCH TEST ===")
-with httpx.Client(timeout=10.0, headers=headers, follow_redirects=True, verify=False) as client:
+with httpx.Client(timeout=10.0, headers=headers, follow_redirects=True, verify=True) as client:
     for q in test_targets:
         r = client.get(f"https://www.nicerating.com/disclosure/companySearch.do?searchText={q}")
         soup = BeautifulSoup(r.text, "html.parser")

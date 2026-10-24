@@ -90,6 +90,7 @@ class CurrentRatingResponse(BaseModel):
     nice_outlook: Optional[str] = None
     search_name_1: Optional[str] = None
     search_name_2: Optional[str] = None
+    search_name_3: Optional[str] = None
     kr_target_rating: Optional[str] = None
     kis_target_rating: Optional[str] = None
     nice_target_rating: Optional[str] = None
@@ -120,13 +121,16 @@ class CurrentRatingDetailResponse(BaseModel):
     final_rating: Optional[str] = None
     overall_status: str
     calculation_logic: Optional[str] = None
+    search_name_1: Optional[str] = None
+    search_name_2: Optional[str] = None
+    search_name_3: Optional[str] = None
     agencies: List[AgencyDetailInfo]
     evaluated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
 class ConfirmRatingRequest(BaseModel):
-    base_year_month: Optional[str] = None # None이면 오늘 기준 YYYY-MM
+    base_year_month: Optional[str] = Field(None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$") # None이면 오늘 기준 YYYY-MM
     confirmed_by: Optional[str] = "USER"
 
 class MonthlyConfirmedRatingItem(BaseModel):

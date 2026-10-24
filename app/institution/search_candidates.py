@@ -96,14 +96,16 @@ def generate_search_candidates(
     original_name: str = "",
     agency_code: str = "",
     search_name_1: str = "",
-    search_name_2: str = ""
+    search_name_2: str = "",
+    search_name_3: str = ""
 ) -> List[str]:
     """
-    전산요건 엑셀 기준 3순위 순차 기업명 검색:
+    전산요건 엑셀 기준 순차 기업명 검색:
     1순위: C열 검색1 (우선검색)
     2순위: D열 검색2 (차선검색)
-    3순위: B열 상품제공기관명 / 정식 법인명 (original_name, institution_name)
-    4순위: 특수 공식 법인명 별칭 (SC제일은행 -> 한국스탠다드차타드은행 등)
+    3순위: 검색3 (추가검색)
+    4순위: B열 상품제공기관명 / 정식 법인명 (original_name, institution_name)
+    5순위: 특수 공식 법인명 별칭 (SC제일은행 -> 한국스탠다드차타드은행 등)
     """
     candidates = []
     seen = set()
@@ -124,15 +126,19 @@ def generate_search_candidates(
     if search_name_2:
         add_cand(search_name_2)
 
-    # 3순위: 전산요건 B열 상품제공기관명 / 정식 법인명
+    # 3순위: 추가 지정 검색3
+    if search_name_3:
+        add_cand(search_name_3)
+
+    # 4순위: 전산요건 B열 상품제공기관명 / 정식 법인명
     if original_name:
         add_cand(original_name)
     if institution_name:
         add_cand(institution_name)
 
-    # 4순위: 특수 공식 법인명 별칭 (SC제일은행 -> 한국스탠다드차타드은행 등)
+    # 5순위: 특수 공식 법인명 별칭 (SC제일은행 -> 한국스탠다드차타드은행 등)
     for key, aliases in KNOWN_CORP_ALIASES.items():
-        if key in [search_name_1, search_name_2, institution_name, original_name]:
+        if key in [search_name_1, search_name_2, search_name_3, institution_name, original_name]:
             for a in aliases:
                 add_cand(a)
 

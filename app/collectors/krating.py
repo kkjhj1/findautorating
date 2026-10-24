@@ -45,7 +45,7 @@ class KRatingAdapter(RatingAgencyAdapter):
 
     def health_check(self) -> bool:
         try:
-            with httpx.Client(timeout=5.0, headers=self.headers, verify=False) as client:
+            with httpx.Client(timeout=5.0, headers=self.headers, verify=True) as client:
                 res = client.get(self.base_url)
                 return res.status_code == 200
         except Exception:
@@ -60,7 +60,7 @@ class KRatingAdapter(RatingAgencyAdapter):
                 return cls._disclosure_cache
 
             try:
-                with httpx.Client(timeout=25.0, headers=headers, verify=False) as client:
+                with httpx.Client(timeout=25.0, headers=headers, verify=True) as client:
                     client.get(f"{base_url}/cms/frCmnCon/index.do?MENU_ID=360")
                     today = date.today()
                     five_years_ago = today - timedelta(days=1825)
@@ -149,7 +149,7 @@ class KRatingAdapter(RatingAgencyAdapter):
         """
         if data is None:
             if client is None:
-                with httpx.Client(timeout=35.0, headers=self.headers, verify=False) as c:
+                with httpx.Client(timeout=35.0, headers=self.headers, verify=True) as c:
                     data = self._get_disclosure_data(c)
             else:
                 data = self._get_disclosure_data(client)
@@ -182,7 +182,7 @@ class KRatingAdapter(RatingAgencyAdapter):
         """
         if data is None:
             if client is None:
-                with httpx.Client(timeout=15.0, headers=self.headers, verify=False) as c:
+                with httpx.Client(timeout=15.0, headers=self.headers, verify=True) as c:
                     data = self._get_disclosure_data(c)
             else:
                 data = self._get_disclosure_data(client)
@@ -276,7 +276,7 @@ class KRatingAdapter(RatingAgencyAdapter):
     ) -> StandardRating:
         source_url = f"{self.base_url}/cms/frCmnCon/index.do?MENU_ID=360"
         try:
-            with httpx.Client(timeout=35.0, headers=self.headers, verify=False) as client:
+            with httpx.Client(timeout=35.0, headers=self.headers, verify=True) as client:
                 data = self._get_disclosure_data(client)
 
                 if search_keywords:
