@@ -10,7 +10,8 @@ def calculate_final_rating(
     kr: Optional[StandardRating] = None,
     kis: Optional[StandardRating] = None,
     nice: Optional[StandardRating] = None,
-    execution_date: Optional[str] = None
+    execution_date: Optional[str] = None,
+    prev_final_rating: Optional[str] = None
 ) -> RatingCalculationResult:
     """
     PRD 제18조 & 제24조 최종등급 산출 Engine:
@@ -18,6 +19,7 @@ def calculate_final_rating(
     - 3곳 / 2곳 / 1곳 최저등급 산출
     - 0곳인 경우 final_rating = None
     - CRAWLING_ERROR / PARSING_ERROR가 포함된 경우 overall_status = MANUAL_CHECK 격리
+    - 전월 유효등급 보유 기관이 당월 전사 미수집된 경우 급변동 안전망(MANUAL_CHECK) 격리
     """
     if execution_date is None:
         execution_date = date.today().isoformat()
@@ -39,7 +41,12 @@ def calculate_final_rating(
 
         status = rating_obj.status
 
-        if status in [CollectionStatus.CRAWLING_ERROR.value, CollectionStatus.PARSING_ERROR.value]:
+        if status in [
+            CollectionStatus.CRAWLING_ERROR.value,
+            CollectionStatus.PARSING_ERROR.value,
+            CollectionStatus.MANUAL_REVIEW.value,
+            CollectionStatus.MANUAL_CHECK.value
+        ]:
             has_error = True
             all_no_rating = False
         elif status == CollectionStatus.MAPPING_REQUIRED.value:
@@ -95,7 +102,11 @@ def calculate_final_rating(
     elif final_rating is not None:
         overall_status = CollectionStatus.SUCCESS.value
     elif all_no_rating:
-        overall_status = CollectionStatus.NO_RATING.value
+        if prev_final_rating and prev_final_rating.strip() and prev_final_rating.strip() != "-":
+            overall_status = CollectionStatus.MANUAL_CHECK.value
+            calculation_logic = f"전월 확정등급({prev_final_rating}) 보유 기관이나 당월 전사 미수집 [수동확인 필요]"
+        else:
+            overall_status = CollectionStatus.NO_RATING.value
     else:
         overall_status = CollectionStatus.MANUAL_CHECK.value
 

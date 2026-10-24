@@ -96,7 +96,7 @@ def finalize_rating(
     agency_code: str,
     rating_type: str,
     raw_company: Optional[RawCompany],
-    records: List[RawRatingRecord],
+    records: Optional[List[RawRatingRecord]] = None,
     target_rating_name: str = "",
     source_url: str = ""
 ) -> StandardRating:
@@ -121,6 +121,19 @@ def finalize_rating(
     )
 
     if not raw_company:
+        # [케이스 C]: 1~3순위 검색어를 모두 조회했으나 기업 자체가 미등록된 경우 -> 실제 무등급 (NO_RATING)
+        base_res.status = CollectionStatus.NO_RATING.value
+        return base_res
+
+    if records is None:
+        # [비정상 케이스]: 사이트 오류, 세션 튕김, 파싱 불가 등으로 조회가 비정상 중단된 경우 -> 확인필요 (MANUAL_REVIEW)
+        base_res.status = CollectionStatus.MANUAL_REVIEW.value
+        base_res.error_message = "상세 공시 내역 정상 조회 실패 (확인필요)"
+        return base_res
+
+    if len(records) == 0:
+        # [정상 조회 완료]: 상세 조회가 정상 완료되었으나 등록된 등급 레코드 자체가 없는 경우 -> 실제 무등급 (NO_RATING)
+        base_res.status = CollectionStatus.NO_RATING.value
         return base_res
 
     # 1. 평가종류 엄격 매칭 레코드 필터링
@@ -130,7 +143,8 @@ def finalize_rating(
             matched_records.append(rec)
 
     if not matched_records:
-        # 기업은 확정되었으나 해당 평가종류의 등급이 없음 -> NO_RATING 확정 (2순위 탐색으로 넘어가지 않음!)
+        # [케이스 A]: 상세 공시 목록 확인 완료되었으나 목표 평가종류만 없는 경우 -> 실제 무등급 (NO_RATING) 확정
+        base_res.status = CollectionStatus.NO_RATING.value
         return base_res
 
     # 2. 유효 등급 정규화 검증

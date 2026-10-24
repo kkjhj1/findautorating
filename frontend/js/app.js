@@ -128,7 +128,7 @@ function initTabs() {
 // 3. 당월 대시보드 데이터 로드
 async function loadDashboardData() {
   try {
-    const res = await fetch("/api/v1/ratings");
+    const res = await fetch(`/api/v1/ratings?_t=${Date.now()}`, { cache: "no-store" });
     if (!res.ok) {
       renderTable([]);
       return;
@@ -152,7 +152,7 @@ async function refreshLiveRatings() {
   if (isLiveUpdating) return;
   isLiveUpdating = true;
   try {
-    const res = await fetch("/api/v1/ratings");
+    const res = await fetch(`/api/v1/ratings?_t=${Date.now()}`, { cache: "no-store" });
     if (!res.ok) return;
     const data = await res.json();
     
@@ -191,7 +191,7 @@ async function refreshLiveRatings() {
 // 4-1. 수집 작업 상태 확인 및 실시간 라이브 렌더링
 async function checkJobStatus() {
   try {
-    const res = await fetch("/api/v1/collector/status");
+    const res = await fetch(`/api/v1/collector/status?_t=${Date.now()}`, { cache: "no-store" });
     if (!res.ok) return;
     const data = await res.json();
     const lastBatchSpan = document.getElementById("lastBatchTime");
@@ -302,6 +302,8 @@ function cleanseScreen() {
   // 기존 기관 데이터 스냅샷 보존 (어떤 기관이 새로 갱신되는지 추적)
   prevRatingsSnapshot.clear();
   liveUpdatedIds.clear();
+
+  // 전체 기관의 당월 등급을 즉시 비우고 COLLECTING(조사중)으로 전환
   allRatingsData.forEach(item => {
     prevRatingsSnapshot.set(item.institution_id, {
       final_rating: item.final_rating,
@@ -310,9 +312,54 @@ function cleanseScreen() {
       nice_rating: item.nice_rating,
       overall_status: item.overall_status
     });
+
+    item.final_rating = null;
+    item.overall_status = "COLLECTING";
+    item.kr_rating = null;
+    item.kr_status = "COLLECTING";
+    item.kis_rating = null;
+    item.kis_status = "COLLECTING";
+    item.nice_rating = null;
+    item.nice_status = "COLLECTING";
+    item.rating_change_status = null;
+    item.rating_change_label = null;
   });
 
-  showToast("⚡ 3대 평가사 실시간 조사가 시작되었습니다. 완료된 기관부터 화면에 즉시 노출됩니다.", true);
+  applyFilters();
+  showToast("⚡ 전체 3대 평가사 실시간 조사가 시작되었습니다. 완료된 기관부터 화면에 즉시 노출됩니다.", true);
+}
+
+// 5-1. 선택 조사 / 오류재조회 시 대상 기관들만 정밀 선별 클렌징 (기타 정상 기관 데이터 100% 보존!)
+function cleanseTargetInstitutions(targetIds) {
+  if (!targetIds || targetIds.length === 0) return;
+  const targetSet = new Set(targetIds);
+
+  targetIds.forEach(id => {
+    const item = allRatingsData.find(d => d.institution_id === id);
+    if (item) {
+      prevRatingsSnapshot.set(id, {
+        final_rating: item.final_rating,
+        kr_rating: item.kr_rating,
+        kis_rating: item.kis_rating,
+        nice_rating: item.nice_rating,
+        overall_status: item.overall_status
+      });
+
+      // 대상 기관만 등급을 비우고 조사중으로 전환
+      item.final_rating = null;
+      item.overall_status = "COLLECTING";
+      item.kr_rating = null;
+      item.kr_status = "COLLECTING";
+      item.kis_rating = null;
+      item.kis_status = "COLLECTING";
+      item.nice_rating = null;
+      item.nice_status = "COLLECTING";
+      item.rating_change_status = null;
+      item.rating_change_label = null;
+    }
+  });
+
+  applyFilters();
 }
 
 function updateKPIs(data) {
@@ -428,6 +475,11 @@ function syncKpiActiveBadge() {
  * 평가사별 신용등급 심플 포맷터 (사용자 요건: 조잡한 태그/뱃지 제거, 전망은 색상으로만 직관적 표기)
  */
 function formatAgencyRatingCell(rating, ratingType, outlook, status) {
+  // 조사 진행 중 상태
+  if (status === "COLLECTING") {
+    return `<span style="color:#60a5fa; font-size:0.75rem; font-weight:500;">조사중...</span>`;
+  }
+
   // 통신 연결 실패/수집 오류 상태 분리 표기
   if (status === "CRAWLING_ERROR" || status === "PARSING_ERROR" || status === "TIMEOUT" || status === "CONNECTION_ERROR") {
     return `<span class="badge-fail-pill" title="평가사 페이지 연결 오류 또는 수집 실패">조사실패</span>`;
@@ -477,9 +529,12 @@ function renderTable(data) {
       : `<span style="color:var(--text-dim)">-</span>`;
 
     // 2. 당월 최종등급
-    const finalBadge = item.final_rating 
-      ? `<span class="rating-badge final mono">${item.final_rating}</span>` 
-      : `<span style="color:var(--text-dim)">-</span>`;
+    let finalBadge = `<span style="color:var(--text-dim)">-</span>`;
+    if (item.overall_status === "COLLECTING") {
+      finalBadge = `<span class="rating-badge collecting mono" style="background:rgba(59,130,246,0.18); color:#60a5fa; font-weight:600;"><span class="spin-icon" style="display:inline-block; font-size:10px;">⏳</span> 조사중</span>`;
+    } else if (item.final_rating) {
+      finalBadge = `<span class="rating-badge final mono">${item.final_rating}</span>`;
+    }
 
     // 3. 전월대비 변동 뱃지
     let changeBadge = `<span style="color:var(--text-dim)">-</span>`;
@@ -561,6 +616,9 @@ async function syncSingleInstitution(institutionId, btn) {
   if (!btn) return;
   btn.classList.add("spinning");
   btn.disabled = true;
+
+  // 단일 기관 즉시 선별 클렌징 (기타 정상 기관 100% 보존!)
+  cleanseTargetInstitutions([institutionId]);
 
   try {
     showToast("해당 기관의 3대 신용평가사 등급을 실시간 재조회 중입니다...", true);
@@ -840,6 +898,7 @@ function getRatingTypeName(code) {
 
 function getStatusName(code) {
   const map = {
+    COLLECTING: "조사중...",
     SUCCESS: "정상",
     NO_RATING: "무등급",
     MANUAL_CHECK: "수동확인",
@@ -1101,6 +1160,9 @@ async function saveExcelWithPicker(blob, defaultFileName) {
     const ids = Array.from(selectedInstitutionIds);
     if (ids.length === 0) return;
 
+    // 선택된 기관들만 선별 클렌징 (기타 정상 기관 데이터 100% 보존!)
+    cleanseTargetInstitutions(ids);
+
     const runSelectedBtn = document.getElementById("btnRunSelected");
     runSelectedBtn.disabled = true;
     runSelectedBtn.innerHTML = `
@@ -1272,6 +1334,9 @@ async function executeRetryErrors() {
 
   const ids = errorItems.map(item => item.institution_id);
   closeModal("retryConfirmModal");
+
+  // [핵심] 오류/확인 대상 기관들만 선별 클렌징! (기타 정상 수집 기관 데이터는 100% 보존!)
+  cleanseTargetInstitutions(ids);
 
   // 진행 상태바 활성화
   const progressCard = document.getElementById("progressCard");

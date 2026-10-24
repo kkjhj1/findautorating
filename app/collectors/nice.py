@@ -14,22 +14,6 @@ from app.rating.finalizer import finalize_rating
 
 _NICE_SEMAPHORE = threading.Semaphore(2)
 
-_NICE_CLIENT: Optional[httpx.Client] = None
-_NICE_CLIENT_LOCK = threading.Lock()
-
-def _get_nice_client(headers: dict) -> httpx.Client:
-    global _NICE_CLIENT
-    if _NICE_CLIENT is None or _NICE_CLIENT.is_closed:
-        with _NICE_CLIENT_LOCK:
-            if _NICE_CLIENT is None or _NICE_CLIENT.is_closed:
-                _NICE_CLIENT = httpx.Client(
-                    timeout=18.0,
-                    headers=headers,
-                    follow_redirects=True,
-                    verify=False,
-                    limits=httpx.Limits(max_keepalive_connections=8, max_connections=12)
-                )
-    return _NICE_CLIENT
 
 class NICEAdapter(RatingAgencyAdapter):
     """
@@ -92,64 +76,79 @@ class NICEAdapter(RatingAgencyAdapter):
             client = httpx.Client(timeout=12.0, headers=self.headers, follow_redirects=True, verify=False)
             should_close = True
 
-        try:
-            resp = client.get(curr_url)
-            if resp.status_code != 200:
-                return None
+        for retry_idx in range(2):
+            try:
+                resp = client.get(curr_url)
+                if resp.status_code != 200:
+                    if retry_idx == 0:
+                        time.sleep(0.2)
+                        continue
+                    return None
 
-            soup = BeautifulSoup(resp.text, "html.parser")
+                soup = BeautifulSoup(resp.text, "html.parser")
 
-            # 1. 단일 기업으로 즉시 상세 페이지로 리디렉션된 경우 (URL에 cmpCd가 포함되거나 상세 화면일 때)
-            if "companyGradeInfo" in str(resp.url):
-                m_url = re.search(r"cmpCd=(\d+)", str(resp.url))
-                if m_url:
-                    cmp_code = m_url.group(1)
-                    # 첫 번째 테이블(기업개요)의 Row 1 첫 번째 셀에서 정확한 사명 확인
-                    comp_txt = ""
-                    t0 = soup.find("table")
-                    if t0:
-                        rows = t0.find_all("tr")
-                        if len(rows) >= 2:
-                            tds = [td.get_text(strip=True) for td in rows[1].find_all(["th", "td"])]
-                            if tds:
-                                comp_txt = tds[0]
+                # 1. 단일 기업으로 즉시 상세 페이지로 리디렉션된 경우 (URL에 cmpCd가 포함되거나 상세 화면일 때)
+                if "companyGradeInfo" in str(resp.url):
+                    m_url = re.search(r"cmpCd=(\d+)", str(resp.url))
+                    if m_url:
+                        cmp_code = m_url.group(1)
+                        # 첫 번째 테이블(기업개요)의 Row 1 첫 번째 셀에서 정확한 사명 확인
+                        comp_txt = ""
+                        t0 = soup.find("table")
+                        if t0:
+                            rows = t0.find_all("tr")
+                            if len(rows) >= 2:
+                                tds = [td.get_text(strip=True) for td in rows[1].find_all(["th", "td"])]
+                                if tds:
+                                    comp_txt = tds[0]
 
-                    if not comp_txt:
-                        title_elem = soup.find(["h2", "h3", "h4", "strong"])
-                        comp_txt = title_elem.get_text(strip=True) if title_elem else keyword
+                        if not comp_txt:
+                            title_elem = soup.find(["h2", "h3", "h4", "strong"])
+                            comp_txt = title_elem.get_text(strip=True) if title_elem else keyword
 
-                    if is_exact_corp_match(keyword, comp_txt) or is_exact_corp_match(keyword, soup.text[:1000]):
+                        if is_exact_corp_match(keyword, comp_txt) or is_exact_corp_match(keyword, soup.text[:1000]):
+                            return RawCompany(
+                                company_name=comp_txt or keyword,
+                                company_id=cmp_code,
+                                matched_keyword=keyword,
+                                search_priority=priority,
+                                source_url=str(resp.url),
+                                extra_data={"cached_html": resp.text}
+                            )
+
+                # 2. 검색 결과 목록 페이지인 경우
+                for a_tag in soup.find_all("a", href=True):
+                    txt = a_tag.get_text(strip=True)
+                    cmp_cd = self._extract_cmp_cd(a_tag)
+                    if cmp_cd and txt and is_exact_corp_match(keyword, txt):
                         return RawCompany(
-                            company_name=comp_txt or keyword,
-                            company_id=cmp_code,
+                            company_name=txt,
+                            company_id=cmp_cd,
                             matched_keyword=keyword,
                             search_priority=priority,
-                            source_url=str(resp.url)
+                            source_url=f"{self.base_url}/disclosure/companyGradeInfo.do?cmpCd={cmp_cd}"
                         )
 
-            # 2. 검색 결과 목록 페이지인 경우
-            for a_tag in soup.find_all("a", href=True):
-                txt = a_tag.get_text(strip=True)
-                cmp_cd = self._extract_cmp_cd(a_tag)
-                if cmp_cd and txt and is_exact_corp_match(keyword, txt):
-                    return RawCompany(
-                        company_name=txt,
-                        company_id=cmp_cd,
-                        matched_keyword=keyword,
-                        search_priority=priority,
-                        source_url=f"{self.base_url}/disclosure/companyGradeInfo.do?cmpCd={cmp_cd}"
-                    )
+                # 일시적 리다이렉트 지연 대비 1회 재시도
+                if retry_idx == 0:
+                    time.sleep(0.2)
+                    continue
 
-            return None
-        finally:
-            if should_close:
-                client.close()
+                return None
+            except Exception:
+                if retry_idx == 0:
+                    time.sleep(0.2)
+                    continue
+                return None
+            finally:
+                if should_close:
+                    client.close()
 
     def fetch_raw_ratings(
         self,
         company: RawCompany,
         client: Optional[httpx.Client] = None
-    ) -> List[RawRatingRecord]:
+    ) -> Optional[List[RawRatingRecord]]:
         """
         [2단계: 기업 상세 수집]
         companyGradeInfo.do?cmpCd={company.company_id} 조회
@@ -162,13 +161,29 @@ class NICEAdapter(RatingAgencyAdapter):
             client = httpx.Client(timeout=12.0, headers=self.headers, follow_redirects=True, verify=False)
             should_close = True
 
-        records: List[RawRatingRecord] = []
+        html_text = ""
         try:
-            resp = client.get(detail_url)
-            if resp.status_code != 200 or "companyGradeInfo" not in str(resp.url):
-                return records
+            # 1단계에서 단일 기업으로 즉시 상세 리다이렉트되어 HTML을 이미 수신한 경우 즉시 재활용 (세션 튕김 원천 방지)
+            if company.extra_data and isinstance(company.extra_data, dict) and company.extra_data.get("cached_html"):
+                html_text = company.extra_data["cached_html"]
+            else:
+                for retry_idx in range(2):
+                    try:
+                        r = client.get(detail_url)
+                        if r.status_code == 200 and "companyGradeInfo" in str(r.url):
+                            html_text = r.text
+                            break
+                        if retry_idx == 0:
+                            time.sleep(0.3)
+                    except Exception:
+                        if retry_idx == 0:
+                            time.sleep(0.3)
 
-            soup = BeautifulSoup(resp.text, "html.parser")
+            if not html_text:
+                return None
+
+            records: List[RawRatingRecord] = []
+            soup = BeautifulSoup(html_text, "html.parser")
 
             # 1. 유효등급 요약 테이블 파싱
             for table in soup.find_all("table"):
@@ -308,46 +323,52 @@ class NICEAdapter(RatingAgencyAdapter):
         for attempt in range(2):
             try:
                 with _NICE_SEMAPHORE:
-                    client = _get_nice_client(self.headers)
-                    if search_keywords:
-                        candidates = search_keywords
-                    else:
-                        candidates = generate_search_candidates(
-                            institution_name=search_name,
-                            original_name=original_name,
-                            agency_code=self.agency_code,
-                            search_name_1=search_name,
-                            search_name_2=search_name_2
-                        )
+                    with httpx.Client(
+                        timeout=18.0,
+                        headers=self.headers,
+                        follow_redirects=True,
+                        verify=False,
+                        limits=httpx.Limits(max_keepalive_connections=4, max_connections=6)
+                    ) as client:
+                        if search_keywords:
+                            candidates = search_keywords
+                        else:
+                            candidates = generate_search_candidates(
+                                institution_name=search_name,
+                                original_name=original_name,
+                                agency_code=self.agency_code,
+                                search_name_1=search_name,
+                                search_name_2=search_name_2
+                            )
 
-                    selected_company: Optional[RawCompany] = None
-                    for priority, kw in enumerate(candidates, start=1):
-                        time.sleep(random.uniform(0.05, 0.15))
-                        comp = self.search_company(kw, priority=priority, client=client)
-                        if comp:
-                            selected_company = comp
-                            break
+                        selected_company: Optional[RawCompany] = None
+                        for priority, kw in enumerate(candidates, start=1):
+                            time.sleep(random.uniform(0.05, 0.15))
+                            comp = self.search_company(kw, priority=priority, client=client)
+                            if comp:
+                                selected_company = comp
+                                break
 
-                    if not selected_company:
-                        return StandardRating(
+                        if not selected_company:
+                            return StandardRating(
+                                institution_id=institution_id,
+                                agency_code=self.agency_code,
+                                rating_type=rating_type,
+                                status=CollectionStatus.NO_RATING.value,
+                                source_url=source_url
+                            )
+
+                        records = self.fetch_raw_ratings(selected_company, client=client)
+
+                        return finalize_rating(
                             institution_id=institution_id,
                             agency_code=self.agency_code,
                             rating_type=rating_type,
-                            status=CollectionStatus.NO_RATING.value,
-                            source_url=source_url
+                            raw_company=selected_company,
+                            records=records,
+                            target_rating_name=target_rating_name,
+                            source_url=selected_company.source_url
                         )
-
-                    records = self.fetch_raw_ratings(selected_company, client=client)
-
-                    return finalize_rating(
-                        institution_id=institution_id,
-                        agency_code=self.agency_code,
-                        rating_type=rating_type,
-                        raw_company=selected_company,
-                        records=records,
-                        target_rating_name=target_rating_name,
-                        source_url=selected_company.source_url
-                    )
 
             except httpx.RequestError as exc:
                 last_error = exc

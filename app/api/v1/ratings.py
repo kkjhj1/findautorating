@@ -369,6 +369,19 @@ def sync_single_institution(institution_id: str, db: Session = Depends(get_db)):
         "NICE": inst.nice_target_rating or ""
     }
 
+    # 전월 확정 이력 조회
+    from app.models.monthly_confirmation import MonthlyConfirmedRating
+    from datetime import timedelta
+    today = date.today()
+    first_day_of_month = today.replace(day=1)
+    last_month_date = first_day_of_month - timedelta(days=1)
+    prev_ym = last_month_date.strftime("%Y-%m")
+    prev_conf = db.query(MonthlyConfirmedRating).filter(
+        MonthlyConfirmedRating.institution_id == inst.institution_id,
+        MonthlyConfirmedRating.base_year_month == prev_ym
+    ).first()
+    prev_rating = prev_conf.final_rating if prev_conf else None
+
     # 1. 단일 기관 3대 평가사 즉시 수집
     inst_res = _collect_for_single_institution(
         inst_id=inst.institution_id,
@@ -377,7 +390,8 @@ def sync_single_institution(institution_id: str, db: Session = Depends(get_db)):
         search_1=inst.search_name_1 or inst.institution_name,
         search_2=inst.search_name_2 or "",
         targets_dict=targets_dict,
-        execution_date_str=today_str
+        execution_date_str=today_str,
+        prev_final_rating=prev_rating
     )
 
     # 2. Raw 결과 저장

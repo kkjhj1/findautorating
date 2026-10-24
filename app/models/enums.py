@@ -19,6 +19,7 @@ class AgencyCode(str, enum.Enum):
     NICE = "NICE"   # NICE신용평가
 
 class CollectionStatus(str, enum.Enum):
+    COLLECTING = "COLLECTING"               # 조사 진행 중 (사전 클렌징 상태)
     SUCCESS = "SUCCESS"                     # 정상 수집
     NO_RATING = "NO_RATING"                 # 무등급 (평가 대상 아님 또는 등급 없음)
     EXPIRED = "EXPIRED"                     # 유효기간 만료

@@ -70,7 +70,8 @@ def _collect_for_single_institution(
     search_1: str,
     search_2: str,
     targets_dict: Dict[str, str],
-    execution_date_str: str
+    execution_date_str: str,
+    prev_final_rating: Optional[str] = None
 ) -> InstitutionCollectResult:
     """
     단일 기관에 대한 3대 평가사 병렬 수집 전담 워커 (스레드 안전, DB 의존성 없음)
@@ -137,7 +138,8 @@ def _collect_for_single_institution(
         kr=ratings_by_agency.get(AgencyCode.KR.value),
         kis=ratings_by_agency.get(AgencyCode.KIS.value),
         nice=ratings_by_agency.get(AgencyCode.NICE.value),
-        execution_date=execution_date_str
+        execution_date=execution_date_str,
+        prev_final_rating=prev_final_rating
     )
 
     return InstitutionCollectResult(
@@ -222,6 +224,64 @@ def run_collection_batch(
             except Exception as e:
                 logger.warning(f"한국기업평가 사전 로드 실패 (진행 중 자동 대응): {e}")
 
+        # 전월 확정 이력 사전 로드
+        today = date.today()
+        first_day_of_month = today.replace(day=1)
+        last_month_date = first_day_of_month - timedelta(days=1)
+        prev_ym = last_month_date.strftime("%Y-%m")
+
+        prev_confirmed_records = db.query(MonthlyConfirmedRating).filter(
+            MonthlyConfirmedRating.base_year_month == prev_ym
+        ).all()
+        prev_confirmed_map = {r.institution_id: r.final_rating for r in prev_confirmed_records if r.final_rating}
+
+        # [사전 클렌징] 조사 대상 기관(전체/선택/오류재조회)의 CurrentRating을 COLLECTING(조사 진행 중)으로 초기화
+        # (선택조사 및 오류재조회 시에는 대상 기관들만 초기화되고, 기타 정상 수집 기관 데이터는 100% 보존됨)
+        target_inst_ids = [inst.institution_id for inst in institutions]
+        target_currents = db.query(CurrentRating).filter(CurrentRating.institution_id.in_(target_inst_ids)).all()
+        current_map = {c.institution_id: c for c in target_currents}
+
+        for inst_id in target_inst_ids:
+            cur = current_map.get(inst_id)
+            if not cur:
+                cur = CurrentRating(institution_id=inst_id)
+                db.add(cur)
+
+            cur.kr_rating = None
+            cur.kr_status = CollectionStatus.COLLECTING.value
+            cur.kr_date = None
+            cur.kr_url = None
+            cur.kr_rating_type = None
+            cur.kr_outlook = None
+
+            cur.kis_rating = None
+            cur.kis_status = CollectionStatus.COLLECTING.value
+            cur.kis_date = None
+            cur.kis_url = None
+            cur.kis_rating_type = None
+            cur.kis_outlook = None
+
+            cur.nice_rating = None
+            cur.nice_status = CollectionStatus.COLLECTING.value
+            cur.nice_date = None
+            cur.nice_url = None
+            cur.nice_rating_type = None
+            cur.nice_outlook = None
+
+            cur.final_rating = None
+            cur.overall_status = CollectionStatus.COLLECTING.value
+            cur.calculation_logic = "신용등급 조사 진행 중..."
+            cur.rating_change_status = None
+            cur.rating_change_label = None
+            cur.notch_delta = 0
+            cur.collected_at = datetime.now(timezone.utc)
+
+            # 전월 공식 등급 보존/설정
+            if inst_id in prev_confirmed_map:
+                cur.prev_final_rating = prev_confirmed_map[inst_id]
+
+        db.commit()
+
         # 스레드 풀 작업을 위한 독립 튜플 데이터 추출 (전산요건 기반)
         inst_tasks = []
         for inst in institutions:
@@ -238,7 +298,8 @@ def run_collection_batch(
                 inst.rating_type,
                 search_1,
                 search_2,
-                targets_dict
+                targets_dict,
+                prev_confirmed_map.get(inst.institution_id)
             ))
 
         # 동시 작업자 수 최적화 (평가사 WAF IP 차단 방지를 위한 안전 4개 스레드)
@@ -254,7 +315,7 @@ def run_collection_batch(
             future_to_inst = {
                 executor.submit(
                     _collect_for_single_institution,
-                    task[0], task[1], task[2], task[3], task[4], task[5], execution_date_str
+                    task[0], task[1], task[2], task[3], task[4], task[5], execution_date_str, task[6]
                 ): task
                 for task in inst_tasks
             }

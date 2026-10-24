@@ -12,6 +12,7 @@ from app.institution.search_candidates import generate_search_candidates, is_exa
 from app.rating.finalizer import finalize_rating
 
 _KIS_SEMAPHORE = threading.Semaphore(3)
+_KIS_TIMEOUT = 35.0
 
 _KIS_CLIENT: Optional[httpx.Client] = None
 _KIS_CLIENT_LOCK = threading.Lock()
@@ -22,7 +23,7 @@ def _get_kis_client(headers: dict) -> httpx.Client:
         with _KIS_CLIENT_LOCK:
             if _KIS_CLIENT is None or _KIS_CLIENT.is_closed:
                 _KIS_CLIENT = httpx.Client(
-                    timeout=20.0,
+                    timeout=_KIS_TIMEOUT,
                     headers=headers,
                     verify=False,
                     limits=httpx.Limits(max_keepalive_connections=8, max_connections=12)
@@ -55,7 +56,7 @@ class KISAdapter(RatingAgencyAdapter):
 
     def health_check(self) -> bool:
         try:
-            with httpx.Client(timeout=5.0, headers=self.headers, verify=False) as client:
+            with httpx.Client(timeout=_KIS_TIMEOUT, headers=self.headers, verify=False) as client:
                 res = client.get(self.base_url)
                 return res.status_code == 200
         except Exception:
@@ -83,7 +84,7 @@ class KISAdapter(RatingAgencyAdapter):
 
         should_close = False
         if client is None:
-            client = httpx.Client(timeout=25.0, headers=self.headers, verify=False)
+            client = httpx.Client(timeout=_KIS_TIMEOUT, headers=self.headers, verify=False)
             should_close = True
 
         try:
@@ -91,7 +92,7 @@ class KISAdapter(RatingAgencyAdapter):
             resp = None
             for attempt in range(2):
                 try:
-                    resp = client.post(source_url, data=payload, timeout=20.0)
+                    resp = client.post(source_url, data=payload, timeout=_KIS_TIMEOUT)
                     if resp.status_code == 200:
                         break
                 except httpx.TimeoutException:
@@ -158,7 +159,7 @@ class KISAdapter(RatingAgencyAdapter):
         self,
         company: RawCompany,
         client: Optional[httpx.Client] = None
-    ) -> List[RawRatingRecord]:
+    ) -> Optional[List[RawRatingRecord]]:
         """
         [2단계: 기업 상세 수집]
         corp_overview.do?kiscd={company.company_id} 상세 카드를 순회하여
@@ -167,14 +168,14 @@ class KISAdapter(RatingAgencyAdapter):
         overview_url = f"{self.base_url}/ratingsSearch/corp_overview.do?kiscd={company.company_id}"
         should_close = False
         if client is None:
-            client = httpx.Client(timeout=10.0, headers=self.headers, verify=False)
+            client = httpx.Client(timeout=_KIS_TIMEOUT, headers=self.headers, verify=False)
             should_close = True
 
         records: List[RawRatingRecord] = []
         try:
-            resp = client.get(overview_url, timeout=20.0)
+            resp = client.get(overview_url, timeout=_KIS_TIMEOUT)
             if resp.status_code != 200:
-                return records
+                return None
 
             soup = BeautifulSoup(resp.text, "html.parser")
             for dl in soup.find_all("dl"):
@@ -230,7 +231,6 @@ class KISAdapter(RatingAgencyAdapter):
         try:
             with _KIS_SEMAPHORE:
                 client = _get_kis_client(self.headers)
-                # 1. 우선순위 키워드 결정 (1순위 -> 2순위 -> 3순위)
                 if search_keywords:
                     candidates = search_keywords
                 else:

@@ -94,3 +94,48 @@ def test_tc_09_rating_normalizer():
     norm2, outlook2 = normalize_rating("AA-(하향검토)")
     assert norm2 == "AA-"
     assert outlook2 == "하향검토"
+
+
+def test_tc_10_no_rating_vs_manual_review_finalizer():
+    """무등급(NO_RATING)과 비정상조회(MANUAL_REVIEW)의 엄격한 분리 검증"""
+    from app.rating.finalizer import finalize_rating
+    from app.schemas.rating import RawCompany, RawRatingRecord
+
+    # 1. 케이스 C: 기업 자체가 미등록된 경우 -> NO_RATING
+    res_c = finalize_rating("INS001", "NICE", "SENIOR_BOND", raw_company=None, records=None)
+    assert res_c.status == CollectionStatus.NO_RATING.value
+
+    # 2. 비정상 조회: 기업은 찾았으나 상세 공시 조회 실패(세션 튕김/오류) -> MANUAL_REVIEW
+    company = RawCompany(company_name="신영증권", company_id="1117045", matched_keyword="신영증권", search_priority=1)
+    res_err = finalize_rating("INS001", "NICE", "SENIOR_BOND", raw_company=company, records=None)
+    assert res_err.status == CollectionStatus.MANUAL_REVIEW.value
+    assert "확인필요" in res_err.error_message
+
+    # 3. 케이스 A: 정상 조회 완료되었으나 목표 평가종류(선순위회사채)가 없는 경우 -> NO_RATING
+    cp_record = RawRatingRecord(company_id="1117045", rating_type_raw="기업어음", raw_rating="A1")
+    res_a = finalize_rating("INS001", "NICE", "SENIOR_BOND", raw_company=company, records=[cp_record], target_rating_name="회사채(선순위)")
+    assert res_a.status == CollectionStatus.NO_RATING.value
+
+
+def test_tc_11_manual_review_isolates_overall_status():
+    """1개사라도 MANUAL_REVIEW(확인필요)가 있으면 overall_status는 MANUAL_CHECK로 안전 격리"""
+    kr = StandardRating(institution_id="INS001", agency_code="KR", rating_type="SENIOR_BOND", rating="AA", status="SUCCESS")
+    kis = StandardRating(institution_id="INS001", agency_code="KIS", rating_type="SENIOR_BOND", rating="AA-", status="SUCCESS")
+    nice = StandardRating(institution_id="INS001", agency_code="NICE", rating_type="SENIOR_BOND", rating=None, status="MANUAL_REVIEW", error_message="확인필요")
+
+    result = calculate_final_rating("INS001", kr=kr, kis=kis, nice=nice)
+    assert result.final_rating == "AA-"
+    assert result.overall_status == CollectionStatus.MANUAL_CHECK.value
+
+
+def test_tc_12_prev_rating_exists_but_current_all_no_rating_safety_net():
+    """전월 확정 등급이 있었는데 당월 전사 무등급인 경우 오조사 의심으로 MANUAL_CHECK 격리"""
+    kr = StandardRating(institution_id="INS001", agency_code="KR", rating_type="SENIOR_BOND", rating=None, status="NO_RATING")
+    kis = StandardRating(institution_id="INS001", agency_code="KIS", rating_type="SENIOR_BOND", rating=None, status="NO_RATING")
+    nice = StandardRating(institution_id="INS001", agency_code="NICE", rating_type="SENIOR_BOND", rating=None, status="NO_RATING")
+
+    result = calculate_final_rating("INS001", kr=kr, kis=kis, nice=nice, prev_final_rating="AA")
+    assert result.final_rating is None
+    assert result.overall_status == CollectionStatus.MANUAL_CHECK.value
+    assert "전월 확정등급" in result.calculation_logic
+
